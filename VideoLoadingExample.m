@@ -10,7 +10,9 @@ for ii = 1:NFrames
     V{end+1} = V;
 end
 V = cell2mat(V);
-V = reshape(V, [480, 640, 300]);
+H = size(V{1}, 1);
+W = size(V{1}, 2);
+V = reshape(V, [H, W, NFrames]);
 
 %Process blocks
 res = 20;

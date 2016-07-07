@@ -102,6 +102,7 @@ NFrames = 160;
 trackedPoints = cell(NFrames, NRegions);
 figure;
 % loop through frames
+outputView = imref2d(size(refFrame));
 for ii = 1:NFrames
       %filename = sprintf('%s/%.5i.jpg', path, ii);
       filename = sprintf('%s/%i.png', path, ii);
@@ -112,10 +113,11 @@ for ii = 1:NFrames
           size(points)
           size(initialPoints{jj})
           if jj == 5
+            %Documentation here: http://www.mathworks.com/help/vision/ref/estimategeometrictransform.html?requestedDomain=www.mathworks.com
             [tform, inlierPtsDistored, inlierPtsOriginal] = estimateGeometricTransform(points, initialPoints{jj}, 'affine');
             clf;
             %TODO: Make sure this transformation is going in the right direction
-            J = imwarp(frame, tform);
+            J = imwarp(frame, tform, 'OutputView', outputView);
             subplot(221);
             imshow(frame);
             subplot(222);

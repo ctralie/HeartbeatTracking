@@ -1,59 +1,64 @@
 % load image data
-path = '.\data\';
-refFrame = imread(strcat(path, '1211.jpg'));
+%path = 'GroundTruth/1';
+%filename = sprintf('%s/00001.jpg', path);
+path = 'MeColorRealSense';
+filename = sprintf('%s/1.png', path);
+refFrame = imread(filename);
 
 % read landmarks acquired using dlib
-load('lm') 
+%load('lm') 
+lm = getKeypointsDlib(filename);
 
 %% define face regions
 
 % define forehead upper boundary using landmarks
 forehead_y = min(lm(:, 2)) - (lm(29, 2) - min(lm(:, 2)));
 
-region = cell(1, 7);
+regions = cell(1, 7);
 colormap = {'y', 'm', 'c', 'r', 'g', 'b', 'w'};
 
 % define region 1: left forehead
 x = [lm(19:22, 1); lm(22, 1); lm(19, 1)];
 y = [lm(19:22, 2); forehead_y; forehead_y];
-region{1} = [x, y];
+regions{1} = [x, y];
 
 % define region 2: middle forehad
 x = [lm([22, 28, 23], 1); lm(23, 1); lm(22, 1)];
 y = [lm([22, 28, 23], 2); forehead_y; forehead_y];
-region{2} = [x, y];
+regions{2} = [x, y];
 
 % define region 3: right forehead 
 x = [lm(23:26, 1); lm(26, 1); lm(23, 1)];
 y = [lm(23:26, 2); forehead_y; forehead_y];
-region{3} = [x, y];
+regions{3} = [x, y];
 
 % define region 4: left cheek
 x = lm([1, 7, 49, 40:42, 37], 1);
 y = lm([1, 7, 49, 40:42, 37], 2);
-region{4} = [x, y];
+regions{4} = [x, y];
 
 % define region 5 right cheek
 x = lm([11, 17, 46:48, 43, 55], 1);
 y = lm([11, 17, 46:48, 43, 55], 2);
-region{5} = [x, y];
+regions{5} = [x, y];
 
 % define region 6 left chin
 x = lm([7:9, 58:60, 49], 1);
 y = lm([7:9, 58:60, 49], 2);
-region{6} = [x, y];
+regions{6} = [x, y];
 
 % define region 7 right chin
 x = lm([9:11, 55:58], 1);
 y = lm([9:11, 55:58], 2);
-region{7} = [x, y];
+regions{7} = [x, y];
+NRegions = length(regions);
 
 figure, imshow(refFrame), hold on
 
-for i = 1:7
-    x = region{i}(:, 1);
-    y = region{i}(:, 2);
-    h = fill(x, y, colormap{i});
+for ii = 1:NRegions
+    x = regions{ii}(:, 1);
+    y = regions{ii}(:, 2);
+    h = fill(x, y, colormap{ii});
     set(h, 'FaceAlpha', 0.3)
 end
 
@@ -70,38 +75,66 @@ roi = [x1, y1, x2 - x1, y2 - y1];
 points = detectMinEigenFeatures(rgb2gray(refFrame), 'ROI', roi);
 
 % select points within each region
-initialPoints = cell(1, 7);
-for i = 1:7
-    in = inpolygon(points.Location(:,1), points.Location(:, 2), region{i}(:, 1), region{i}(:, 2));
-    initialPoints{i} = points.Location(in, :);
+initialPoints = cell(1, NRegions);
+for ii = 1:NRegions
+    in = inpolygon(points.Location(:,1), points.Location(:, 2), regions{ii}(:, 1), regions{ii}(:, 2));
+    initialPoints{ii} = points.Location(in, :);
 end
 
 % show tracked points
 figure, imshow(refFrame), title('Detected interest points'), hold on;
-for i = 1:7
-    scatter(initialPoints{i}(:, 1), initialPoints{i}(:, 2), colormap{i})
+for ii = 1:7
+    scatter(initialPoints{ii}(:, 1), initialPoints{ii}(:, 2), colormap{ii})
 end
+print('-dpng', '-r100', 'TrackedPoints.png');
 
 %% track points
 
 % initialize tracker for each region
-trackers = cell(1, 7);
+trackers = cell(1, NRegions);
 
-for i = 1:7
-    trackers{i} = vision.PointTracker('MaxBidirectionalError', 1);
-    initialize(trackers{i}, initialPoints{i}, refFrame);
+for ii = 1:7
+    trackers{ii} = vision.PointTracker('MaxBidirectionalError', 1);
+    initialize(trackers{ii}, initialPoints{ii}, refFrame);
 end
 
-trackedPointsX = cell(1, 7); % X coordinates
-trackedPointsY = cell(1, 7); % Y coordinates
+NFrames = 160;
+trackedPoints = cell(NFrames, NRegions);
+figure;
 % loop through frames
-for i = 1:5
-      frame = imread(strcat(path, num2str(1211 + i), '.jpg'));
-      figure, imshow(frame), hold on
-      for j = 1:7
-      [points, validity] = step(trackers{j}, frame);
-      trackedPointsX{j} = cat(1, trackedPointsX{j}, points(:, 1)');
-      trackedPointsY{j} = cat(1, trackedPointsY{j}, points(:, 2)');
-      scatter(points(:, 1), points(:, 2), colormap{j})
+for ii = 1:NFrames
+      %filename = sprintf('%s/%.5i.jpg', path, ii);
+      filename = sprintf('%s/%i.png', path, ii);
+      frame = imread(filename);
+      %figure, imshow(frame), hold on
+      for jj = 1:7
+          [points, validity] = step(trackers{jj}, frame);
+          size(points)
+          size(initialPoints{jj})
+          if jj == 5
+            [tform, inlierPtsDistored, inlierPtsOriginal] = estimateGeometricTransform(points, initialPoints{jj}, 'affine');
+            clf;
+            %TODO: Make sure this transformation is going in the right direction
+            J = imwarp(frame, tform);
+            subplot(221);
+            imshow(frame);
+            subplot(222);
+            imshow(J);
+            subplot(223);
+            showMatchedFeatures(refFrame, frame, initialPoints{jj}, points);
+            P = initialPoints{jj};
+            minX = min(P(:, 1)); maxX = max(P(:, 1));
+            minY = min(P(:, 2)); maxY = max(P(:, 2));
+            xlim([minX, maxX]);
+            ylim([minY, maxY]);
+            subplot(224);
+%             fig = gcf;
+%             fig.PaperUnits = 'inches';
+%             fig.PaperPosition = [0 0 20 10];
+            print('-dpng', '-r100', sprintf('%i.png', ii));
+          end
+          
+          trackedPoints{ii, jj} = points;
+          %scatter(points(:, 1), points(:, 2), colormap{jj})
       end
 end

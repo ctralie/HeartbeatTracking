@@ -6,4 +6,3 @@ function [X] = getKeypointsDlib(filename)
     X = cell2mat(textscan(fin, '(%f, %f)'));
     fclose(fin);
 end
-

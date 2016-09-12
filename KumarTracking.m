@@ -13,18 +13,24 @@
 % startFrame = 890;
 % groundTruthMean = 71.2081;
 
-Fs = 30;
-path = 'GroundTruth/3';
-NFrames = 900;
-filename = sprintf('%s/1211.jpg', path);
-startFrame = 1210;
-groundTruthMean = 61.4943;
+% Fs = 30;
+% path = 'GroundTruth/3';
+% NFrames = 900;
+% filename = sprintf('%s/1211.jpg', path);
+% startFrame = 1210;
+% groundTruthMean = 61.4943;
 
 % Fs = 40; %Sample rate
 % path = 'MeColorRealSense'; 
 % NFrames = 400;
 % filename = sprintf('%s/1.png', path);
 % startFrame = 0;
+
+Fs = 30;
+path = 'GeorgeData/4_30_mauricio_ir_depth_30/ir';
+NFrames = 400;
+filename = sprintf('%s/ir_0000.png', path);
+startFrame = 0;
 
 
 refFrame = imread(filename);
@@ -43,9 +49,10 @@ I = zeros(NFrames, numel(refFrame));
 %open(V);
 for ii = 1:NFrames
     fprintf(1, 'Loading frame %i...\n', ii);
-    filename = sprintf('%s/%.4i.jpg', path, ii+startFrame);
+    %filename = sprintf('%s/%.4i.jpg', path, ii+startFrame);
     %filename = sprintf('%s/%.5i.jpg', path, ii+startFrame);
     %filename = sprintf('%s/%i.png', path, ii);
+    filename = sprintf('%s/ir_%.4i.png', path, ii+startFrame);
     frame = imread(filename);
     %writeVideo(V, frame);
     I(ii, :) = frame(:);
@@ -89,11 +96,13 @@ for kk = 1%1:NBlocks %Go through each "epoch" as Kumar calls it
         J = reshape(J, [size(J, 1), size(patches, 2), size(patches, 3)]);
         J = squeeze(mean(J, 2));
         JFilt = filtfilt(bpfilter, 1, J);
-        %JFilt2 = getSmoothedDerivative(J, 20);
+        JFilt2 = getSmoothedDerivative(J, 20);
         
         for aa = 1:3
             X((pp-1)*3+aa, :) = JFilt(:, aa);
         end
+        t1 = (1:size(J, 1))/Fs;
+        t2 = (1:size(JFilt2, 1))/Fs;
         
 %         clf;
 %         
@@ -102,8 +111,6 @@ for kk = 1%1:NBlocks %Go through each "epoch" as Kumar calls it
 %         F(patches(pp, :, 1)) = 0;
 %         imagesc(F);
 %         
-%         t1 = (1:size(J, 1))/Fs;
-%         t2 = (1:size(JFilt2, 1))/Fs;
 %         
 %         subplot(222);
 %         J = bsxfun(@minus, mean(J, 1), J);
@@ -146,7 +153,7 @@ for kk = 1%1:NBlocks %Go through each "epoch" as Kumar calls it
     clf;
     subplot(211);
     plot(t1, SCoarse);
-    title('Initial Coarse Time Serise');
+    title('Initial Coarse Time Series');
     subplot(212);
     plot(freq*60, abs(PCoarse));
     xlim([fl, fh]*60);
@@ -157,8 +164,8 @@ for kk = 1%1:NBlocks %Go through each "epoch" as Kumar calls it
     %Step 3: Estimage goodness of regions
     
     %Figure out frequency index range of pulse window
-    PRL = floor(1 + ((bmpCoarse - bWin)/60)*(N/Fs));
-    PRH = ceil(1 + ((bmpCoarse + bWin)/60)*(N/Fs));
+    PRL = floor(1 + ((bpmCoarse - bWin)/60)*(N/Fs));
+    PRH = ceil(1 + ((bpmCoarse + bWin)/60)*(N/Fs));
     %Figure out frequency index range of passband
     BPL = floor(1 + fl*N/Fs);
     BPH = floor(1 + fh*N/Fs);
@@ -183,7 +190,7 @@ for kk = 1%1:NBlocks %Go through each "epoch" as Kumar calls it
     clf;
     subplot(211);
     plot(t1, SFinal);
-    title('Final Filtered Time Serise');
+    title('Final Filtered Time Series');
     subplot(212);
     plot(freq*60, abs(PFinal));
     xlim([fl, fh]*60);

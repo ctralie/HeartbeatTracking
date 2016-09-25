@@ -1,17 +1,19 @@
+DOWARPPLOT = False;
+
 %% Load Video
 %load image data
 % Fs = 30;
-% path = 'GroundTruth/2';
+% path = 'GroundTruth/1';
 % NFrames = 400;
 % startFrame = 0;
 % filename = sprintf('%s/00001.jpg', path);
 
-Fs = 30;
-path = 'GroundTruth/4';
-NFrames = 900;
-filename = sprintf('%s/0891.jpg', path);
-startFrame = 890;
-groundTruthMean = 71.2081;
+% Fs = 30;
+% path = 'GroundTruth/4';
+% NFrames = 900;
+% filename = sprintf('%s/0891.jpg', path);
+% startFrame = 890;
+% groundTruthMean = 71.2081;
 
 % Fs = 30;
 % path = 'GroundTruth/3';
@@ -32,38 +34,85 @@ groundTruthMean = 71.2081;
 % filename = sprintf('%s/ir_0000.png', path);
 % startFrame = 0;
 
-I = zeros(NFrames, numel(refFrame));
+% Fs = 15;
+% path = 'obama';
+% NFrames = 110;
+% filename = sprintf('%s/1941.png', path);
+% startFrame = 1940;
+
+Fs = 15;
+path = 'bush';
+NFrames = 280;
+filename = sprintf('%s/4829.png', path);
+startFrame = 4828;
+
 %V = VideoWriter('video.avi');
 %open(V);
 files = cell(1, NFrames);
 for ii = 1:NFrames
     fprintf(1, 'Loading frame %i...\n', ii);
-    filename = sprintf('%s/%.4i.jpg', path, ii+startFrame);
+    %filename = sprintf('%s/%.4i.jpg', path, ii+startFrame);
     %filename = sprintf('%s/%.5i.jpg', path, ii+startFrame);
-    %filename = sprintf('%s/%i.png', path, ii);
+    filename = sprintf('%s/%i.png', path, ii+startFrame);
     %filename = sprintf('%s/ir_%.4i.png', path, ii+startFrame);
     frame = imread(filename);
     files{ii} = filename;
     %writeVideo(V, frame);
+    if ii == 1
+        refFrame = frame;
+        I = zeros(NFrames, numel(refFrame));
+    end
     I(ii, :) = frame(:);
 end
-refFrame = imread(files{1});
 
 %close(V);
 
 tic;
 Keypoints = getKeypointsDlib(files);
+lm = Keypoints{1};
+xr = [min(lm(:, 1)), max(lm(:, 1))];
+yr = [min(lm(:, 2)), max(lm(:, 2))];
 toc;
 
+%Do affine warping of all frames
+%First calculate the triangle indices and barycentric coordinates
+%of pixel locations in the original frame
+D1 = delaunayTriangulation(Keypoints{1});
+[X, Y] = meshgrid(1:size(refFrame, 2), 1:size(refFrame, 1));
+P = [X(:) Y(:)];
+triIdx = D1.pointLocation(P);
+refFrameIdx = 1:size(P, 1);
+P = P(~isnan(triIdx), :);
+refFrameIdx = refFrameIdx(~isnan(triIdx));
+triIdx = triIdx(~isnan(triIdx));
+bar = D1.cartesianToBarycentric(triIdx, P);
+
+V = VideoWriter('Warped.avi');
+open(V);
 for ii = 1:length(Keypoints)
-    F = reshape(I(ii, :), size(refFrame));
-    clf;
-    imagesc(uint8(F));
-    hold on;
-    lm = Keypoints{ii};
-    plot(lm(:, 1), lm(:, 2), '.');
-    print('-dpng', '-r100', sprintf('%i.png', ii));
+    FOrig = reshape(I(ii, :), size(refFrame));
+    F = AffineWarp(D1, triIdx, bar, refFrameIdx, FOrig, Keypoints{ii});
+    writeVideo(V, uint8(F(yr(1):yr(2), xr(1):xr(2), :)));
+    if DOWARPPLOT
+        clf;
+        subplot(121);
+        imagesc(uint8(FOrig));
+        hold on;
+        lm = Keypoints{ii};
+        plot(lm(:, 1), lm(:, 2), '.');
+        axis off;
+        subplot(122);
+        imagesc(uint8(F));
+        xlim(xr);
+        ylim(yr);
+        axis off;
+        fig = gcf;
+        fig.PaperUnits = 'inches';
+        fig.PaperPosition = [0 0 12 6];
+        print('-dpng', '-r100', sprintf('%i.png', ii));
+    end
 end
+close(V);
 
 
 

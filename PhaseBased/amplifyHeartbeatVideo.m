@@ -11,9 +11,10 @@ scaleAndClipLargeVideos = true; % With this enabled, approximately 4GB of memory
 % Uncomment to process full video sequences (uses about 16GB of memory)
 %scaleAndClipLargeVideos = false;
 
-for ss = 2:4
-    inFile = sprintf('subject%i.avi', ss);
-    samplingRate = 25; % Hz
+% for ss = 2:4
+    %inFile = sprintf('subject%i.avi', ss);
+    inFile = 'BushWarped.avi';
+    samplingRate = 30; % Hz
     loCutoff = 0.5;    % Hz
     hiCutoff = 3;    % Hz
     alpha = 5;    
@@ -25,4 +26,4 @@ for ss = 2:4
     else
         phaseAmplify(inFile, alpha, loCutoff, hiCutoff, samplingRate, '../','sigma', sigma,'pyrType', pyrType, 'scaleVideo', 1);
     end
-end
+% end

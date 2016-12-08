@@ -3,18 +3,19 @@
 %Returns:
 %bpmFinal: Estimate of heartrate in beats per minute in this block
 %freq, PFinal: Spectrum of estimates
-function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, DebugStr)
+function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, DebugStr, patches)
     if nargin < 7
         DebugStr = -1;
     end
     
-    %Step 1: Compute coarse estimate of pulse rate (Section 4.3)
+    %Step 1: Compute coarse estimate of pulse rate by averaging (Section 4.3)
     XRange = max(X, [], 2) - min(X, [], 2);
-    SCoarse = sum(X(XRange < Ath, :), 1);
+    SCoarse = squeeze(sum(X(XRange < Ath, :), 1));
     N = length(SCoarse);
     PCoarse = fft(SCoarse);
     PCoarse = PCoarse(1:N/2+1);
     PCoarse = (1/(Fs*N)) * abs(PCoarse).^2;
+    PCoarse(:, 1) = 0; %Just in case X wasn't mean-centered
     freq = 0:Fs/N:Fs/2;
     [~, idxPR] = max(PCoarse);
     bpmCoarse = freq(idxPR)*60;
@@ -26,7 +27,7 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
         title('Initial Coarse Time Series');
         subplot(212);
         plot(freq*60, abs(PCoarse));
-        xlim([fl, fh]*60);
+        %xlim([fl, fh]*60);
         xlabel('Beats Per Minute');
         title(sprintf('Initial Coarse Power Spectrum (Max %g bmp)', bpmCoarse));
         print('-dsvg', sprintf('KumarCoarseEstimate%s.svg', DebugStr));
@@ -51,14 +52,14 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     
     %Step 3: Compute Final Estimate Based on Updated Goodness of Fit
     %Regions
-    SFinal = sum(bsxfun(@times, G(:), X), 1);
+    SFinal = squeeze(sum(bsxfun(@times, G(:), X), 1));
     PFinal = fft(SFinal);
     PFinal = PFinal(1:N/2+1);
     PFinal = (1/(Fs*N)) * abs(PFinal).^2;
     [~, idxFinal] = max(PFinal);
     bpmFinal = freq(idxFinal)*60;
     
-    if DebugString ~= -1
+    if DebugStr ~= -1
         clf;
         subplot(211);
         plot(t1, SFinal);
@@ -79,8 +80,7 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     end
     
     %Step 4: Visualize Goodness of Fit of Patches
-    %Visualize goodness of fit
-    if DebugString ~= -1
+    if DebugStr ~= -1
         IMScores = refFrame;
         G = uint8(255*G/max(G(:)));
         for pp = 1:size(patches, 1)
@@ -88,6 +88,6 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
                 IMScores(patches(pp, :, aa)) = G(aa+(pp-1)*3);
             end
         end
-        imwrite(IMScores, sprintf('GoodnessFit%i.png', kk));
+        imwrite(IMScores, sprintf('GoodnessFit%s.png', DebugStr));
     end
 end

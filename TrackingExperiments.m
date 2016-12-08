@@ -1,6 +1,7 @@
 addpath('CVPR2014Data');
 addpath('GeorgeData');
 addpath('OtherData');
+addpath(genpath('exact_alm_rpca')); %RPCA Code
 
 %% Main Parameters
 %Output Options
@@ -125,9 +126,11 @@ for kk = 1:NBlocks
             print('-dpng', '-r100', sprintf('BandpassPatch%i.png', pp));
         end
     end %End patch averaging / filtering loop
+    %Subtract off mean of each patch
+    X = bsxfun(@minus, X, mean(X, 2));
     
     %Step 2: Apply different tracking techniques to each block
-    [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk));
+    [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches);
     
 
 end %End block loop

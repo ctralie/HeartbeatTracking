@@ -39,7 +39,7 @@ for ii = 1:NFrames
 end
 
 %Now do RPCA
-[XRPCA, Outlier, iter] = inexact_alm_rpca(X, 1e-3);
+[XRPCA, Outlier, iter] = inexact_alm_rpca(X, 5e-2);
 
 for ii = 1:NFrames
     clf;

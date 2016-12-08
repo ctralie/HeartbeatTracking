@@ -85,13 +85,13 @@ refFrameIdx = 1:size(P, 1);
 P = P(~isnan(triIdx), :);
 refFrameIdx = refFrameIdx(~isnan(triIdx));
 triIdx = triIdx(~isnan(triIdx));
-bar = D1.cartesianToBarycentric(triIdx, P);
+bary = D1.cartesianToBarycentric(triIdx, P);
 
 V = VideoWriter('Warped.avi');
 open(V);
 for ii = 1:length(Keypoints)
     FOrig = reshape(I(ii, :), size(refFrame));
-    F = AffineWarp(D1, triIdx, bar, refFrameIdx, FOrig, Keypoints{ii});
+    F = AffineWarp(D1, triIdx, bary, refFrameIdx, FOrig, Keypoints{ii});
     writeVideo(V, uint8(F(yr(1):yr(2), xr(1):xr(2), :)));
     if DOWARPPLOT
         clf;

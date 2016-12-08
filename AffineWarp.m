@@ -1,9 +1,9 @@
 %D1: Delaunay object for the first frame, to which this is being warped
 %IM: Image
 %X: Keypoints
-function [J] = AffineWarp(D1, triIdx, bar, refFrameIdx, I, X)
+function [J] = AffineWarp(D1, triIdx, bary, refFrameIdx, I, X)
     D2 = triangulation(D1.ConnectivityList, X);
-    PNew = D2.barycentricToCartesian(triIdx, bar);
+    PNew = D2.barycentricToCartesian(triIdx, bary);
     
     %Do warping to the output image by pulling back map from original frame
     %to this frame

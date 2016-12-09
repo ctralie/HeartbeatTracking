@@ -8,6 +8,7 @@ addpath(genpath('exact_alm_rpca')); %RPCA Code
 DOWARPPLOT = 0;
 PLOTPATCHES = 1;
 PLOTBANDPASSFILTERS = 0;
+DEBUGKUMAR = 1;
 
 %Video parameters
 PatchSize = 20;
@@ -16,13 +17,14 @@ DOAFFINEWARP = 0;
 %Processing Parameters
 BlockLenSec = 5;
 BlockHopSec = 1;
+lowranklambda = 0; %Do a low rank approximation of the patch time series?
 
 
 
 
 %% Video loading / Keypoint Detection / Warping
 %Step 1: Load in video and ground truth data
-[I, files, refFrame, Fs, groundTruthMean] = getCVPR2014Video(4, 400);
+%[I, files, refFrame, Fs, groundTruthMean] = getCVPR2014Video(4, 400);
 NFrames = size(I, 1);
 
 %Step 2: Get keypoints, face regions, and patches within those regions
@@ -61,11 +63,10 @@ NBlocks = floor((NFrames-BlockLen)/BlockHop+1);
 %Kumar Parameters
 Ath = 8; %Maximum range cutoff for regions
 bWin = 5; %b in Equation 7
-Kappa = 0.3;
 
-rates = linspace(30, 200, 1000);
-scores = 0*rates;
-AllRates = [];
+%Circular coordinate parameters
+W = 15;
+Kappa = 0.3;
 
 %Bandpass Filter design
 fl = 0.7;
@@ -82,19 +83,27 @@ bpfilter = fir1(floor(BlockLen/3.1),[minfq maxfq]);
 %% Loop Through Blocks And Do Heartrate Estimates
 for kk = 1:NBlocks
     fprintf(1, 'Doing Block %i of %i...\n', kk, NBlocks);
+    hopOffset = BlockHop*(kk-1);
     X = zeros(size(patches, 1)*size(patches, 3), BlockLen); %Allocate space for the averaged/filtered patches
+    NPatches = size(patches, 1);
     
     %Step 1: Average and bandpass filter regions of interest
-    for pp = 1:size(patches, 1)
-        J = I(BlockHop*(kk-1)+(1:BlockLen), patches(pp, :, :));
+    for pp = 1:NPatches
+        J = I(hopOffset+(1:BlockLen), patches(pp, :, :));
         J = reshape(J, [size(J, 1), size(patches, 2), size(patches, 3)]);
         J = squeeze(mean(J, 2)); %Spatial average within patch
         JFilt = filtfilt(bpfilter, 1, J); %Bandpass Filter
         JFilt2 = getSmoothedDerivative(J, 20); %Smoothed Derivative Filter
         
+        %Stack all of the channels separately.  Put all R first, all G
+        %second, all B third
         for aa = 1:3
-            X((pp-1)*3+aa, :) = JFilt(:, aa);
+            X((aa-1)*NPatches + pp, :) = JFilt(:, aa);
         end
+        if lowranklambda > 0
+            [X, Outlier, iter] = inexact_alm_rpca(X, lowranklambda);
+        end
+        
         t1 = (1:size(J, 1))/Fs;
         t2 = (1:size(JFilt2, 1))/Fs;
         
@@ -130,7 +139,15 @@ for kk = 1:NBlocks
     X = bsxfun(@minus, X, mean(X, 2));
     
     %Step 2: Apply different tracking techniques to each block
-    [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches);
+    
+    %Kumar Technique
+%     if DEBUGKUMAR
+%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
+%     else
+%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
+%     end
+
+	[bpmFinal, rates, scores, AllDs] = TrackCircularCoordinates(X, Fs, W, Kappa, refFrame, patches, sprintf('Circular%i', kk), sprintf('Circular%i', kk), hopOffset);
     
 
 end %End block loop

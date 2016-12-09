@@ -3,8 +3,8 @@
 %Returns:
 %bpmFinal: Estimate of heartrate in beats per minute in this block
 %freq, PFinal: Spectrum of estimates
-function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, DebugStr, patches)
-    if nargin < 7
+function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, DebugStr, patches, hopOffset)
+    if nargin < 9
         DebugStr = -1;
     end
     
@@ -22,15 +22,15 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     
     if DebugStr ~= -1
         clf;
-        subplot(211);
-        plot(t1, SCoarse);
-        title('Initial Coarse Time Series');
-        subplot(212);
+        subplot(411);
+        plot(t1 + hopOffset/Fs, SCoarse);
+        xlim([hopOffset/Fs, hopOffset/Fs + max(t1(:))]);
+        title(sprintf('Initial Coarse Time Series %.3g Second Window', t1(end)-t1(1)));
+        subplot(412);
         plot(freq*60, abs(PCoarse));
-        %xlim([fl, fh]*60);
+        xlim([fl, fh]*60);
         xlabel('Beats Per Minute');
         title(sprintf('Initial Coarse Power Spectrum (Max %g bmp)', bpmCoarse));
-        print('-dsvg', sprintf('KumarCoarseEstimate%s.svg', DebugStr));
     end
     
     %Step 2: Estimage goodness of regions
@@ -52,6 +52,7 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     
     %Step 3: Compute Final Estimate Based on Updated Goodness of Fit
     %Regions
+    %New sum weighted by goodness of fit of each region
     SFinal = squeeze(sum(bsxfun(@times, G(:), X), 1));
     PFinal = fft(SFinal);
     PFinal = PFinal(1:N/2+1);
@@ -60,23 +61,23 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     bpmFinal = freq(idxFinal)*60;
     
     if DebugStr ~= -1
-        clf;
-        subplot(211);
-        plot(t1, SFinal);
+        subplot(413);
+        plot(t1 + hopOffset/Fs, SFinal);
+        xlim([hopOffset/Fs, hopOffset/Fs + max(t1(:))]);
         title('Final Filtered Time Series');
-        subplot(212);
+        subplot(414);
         plot(freq*60, abs(PFinal));
         xlim([fl, fh]*60);
         xlabel('Beats Per Minute');
         title(sprintf('Final Filtered Power Spectrum (Max %g bmp)', bpmFinal));
-        print('-dsvg', sprintf('FinalEstimate%s.svg', DebugStr));
+        print('-dpng', sprintf('KumarEstimate%s.png', DebugStr));
 
         clf;
         hist(G);
         title('Goodness Ratios');
         ylabel('Count');
         xlabel('Ratios');
-        print('-dsvg', sprintf('GoodnessHist%s.svg', DebugStr));
+        print('-dpng', sprintf('GoodnessHist%s.png', DebugStr));
     end
     
     %Step 4: Visualize Goodness of Fit of Patches

@@ -1,6 +1,14 @@
+%Programmer: Chris Tralie
+%Purpose: To make it easy to run a bunch of different heartrate detection
+%algorithms in overlapping blocks.  Only the frames needed to process the
+%current block are stored in memory.  It's easy to mix and match different
+%algorithms and parameters (e.g. affine warping, low rank stuff)
+
+addpath('BUData');
 addpath('CVPR2014Data');
 addpath('GeorgeData');
 addpath('OtherData');
+addpath('CircularCoordinates');
 addpath(genpath('exact_alm_rpca')); %RPCA Code
 
 %% Main Parameters
@@ -9,6 +17,8 @@ DOWARPPLOT = 0;
 PLOTPATCHES = 1;
 PLOTBANDPASSFILTERS = 0;
 DEBUGKUMAR = 1;
+DEBUGCIRCULAR = 0;
+DEBUGCIRCULARPATCHES = 0;
 
 %Video parameters
 PatchSize = 20;
@@ -16,16 +26,34 @@ DOAFFINEWARP = 0;
 
 %Processing Parameters
 BlockLenSec = 5;
-BlockHopSec = 1;
+BlockHopSec = 0.5;
 lowranklambda = 0; %Do a low rank approximation of the patch time series?
 
 
 
 
-%% Video loading / Keypoint Detection / Warping
-%Step 1: Load in video and ground truth data
-%[I, files, refFrame, Fs, groundTruthMean] = getCVPR2014Video(4, 400);
-NFrames = size(I, 1);
+%% Video loading / Keypoint Detection / Setting Up Patch Regions
+%Step 1: Configure video to be loaded
+%[I, files, refFrame, Fs, GTPR] = getCVPR2014Video(4, 400);
+VideoLoader = @(i1, i2) getBUVideo(0, 'F013/T1', i1, i2);
+
+%Load the first frame just to get the sample rate and the total number of
+%frames
+ret = VideoLoader(1, 1);
+Fs = ret.Fs;
+NFrames = ret.NFrames;
+refFrame = ret.refFrame; %Reference frame
+GTPR = ret.GTPR; %Ground truth pulse rate
+
+%Setup Block Window Parameters
+BlockLen = round(Fs*BlockLenSec); %Number of video frames per block
+BlockHop = round(Fs*BlockHopSec); %Number of video frames to hop to next block
+NBlocks = floor((NFrames-BlockLen)/BlockHop+1);
+
+%Now load in the first block
+ret = VideoLoader(1, BlockLen);
+files = ret.files;
+I = ret.I;
 
 %Step 2: Get keypoints, face regions, and patches within those regions
 if DOAFFINEWARP
@@ -45,21 +73,19 @@ if PLOTPATCHES
     end
     imagesc(IM);
     title('Patches');
+    print('-dpng', '-r100', 'Patches.png');
 end
+
+VWarpedWriter = VideoWriter('WarpedVideo.avi');
+open(VWarpedWriter);
 
 %Step 3: If enabled, affine warp all frames to the first frame
 if DOAFFINEWARP
-    I = doAffineWarpVideo(I, refFrame, Keypoints, DOWARPPLOT);
+    I = doAffineWarpVideo(I, refFrame, Keypoints, VWarpedWriter, DOWARPPLOT, 0);
 end
 
 
-
-
-%% Setup Block Window Parameters
-BlockLen = round(Fs*BlockLenSec); %Number of video frames per block
-BlockHop = round(BlockHopSec); %Number of video frames to hop to next block
-NBlocks = floor((NFrames-BlockLen)/BlockHop+1);
-
+%% Setup Algorithm Parameters
 %Kumar Parameters
 Ath = 8; %Maximum range cutoff for regions
 bWin = 5; %b in Equation 7
@@ -78,18 +104,34 @@ bpfilter = fir1(floor(BlockLen/3.1),[minfq maxfq]);
 
 
 
-
-
 %% Loop Through Blocks And Do Heartrate Estimates
+KumarRates = zeros(1, NBlocks);
+lastIdx = BlockLen;
+
 for kk = 1:NBlocks
     fprintf(1, 'Doing Block %i of %i...\n', kk, NBlocks);
     hopOffset = BlockHop*(kk-1);
+    if kk > 1
+        %Load in new frames and discard oldest frames
+        I = I(BlockHop+1:end, :);
+        files = files(BlockHop+1:end);
+        
+        hopOffset = BlockHop*(kk-1);
+        ret = VideoLoader(lastIdx+1, lastIdx+BlockHop);
+        if DOAFFINEWARP
+            Keypoints = getKeypointsDlib(files);
+            ret.I = doAffineWarpVideo(ret.I, refFrame, Keypoints, VWarpedWriter, DOWARPPLOT, lastIdx+1);
+        end
+        I = [I; ret.I];
+        lastIdx = lastIdx + BlockHop;
+    end
+    
     X = zeros(size(patches, 1)*size(patches, 3), BlockLen); %Allocate space for the averaged/filtered patches
     NPatches = size(patches, 1);
     
     %Step 1: Average and bandpass filter regions of interest
     for pp = 1:NPatches
-        J = I(hopOffset+(1:BlockLen), patches(pp, :, :));
+        J = I(:, patches(pp, :, :));
         J = reshape(J, [size(J, 1), size(patches, 2), size(patches, 3)]);
         J = squeeze(mean(J, 2)); %Spatial average within patch
         JFilt = filtfilt(bpfilter, 1, J); %Bandpass Filter
@@ -139,15 +181,29 @@ for kk = 1:NBlocks
     X = bsxfun(@minus, X, mean(X, 2));
     
     %Step 2: Apply different tracking techniques to each block
-    
     %Kumar Technique
-%     if DEBUGKUMAR
-%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
-%     else
-%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
-%     end
-
-	[bpmFinal, rates, scores, AllDs] = TrackCircularCoordinates(X, Fs, W, Kappa, refFrame, patches, sprintf('Circular%i', kk), sprintf('Circular%i', kk), hopOffset);
+    if DEBUGKUMAR
+        [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
+    else
+        [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
+    end
+    KumarRates(kk) = bpmFinal;
     
+    %Circular coordinates technique;
+	%[bpmFinal, rates, scores, AllDs] = TrackCircularCoordinates(X, Fs, W, Kappa, refFrame, patches, sprintf('Circular%i', kk), sprintf('Circular%i', kk), hopOffset);
 
 end %End block loop
+
+%Plot performance against ground truth
+clf;
+ts = (1:length(KumarRates))*BlockHopSec;
+plot(ts, KumarRates, 'b');
+hold on;
+ts = (1:length(GTPR))/1000.0;
+plot(ts, GTPR, 'r');
+xlabel('Time');
+ylabel('HeartRate');
+legend({'Kumar Estimate', 'Ground Truth'});
+title('Performance');
+
+close(VWarpedWriter);

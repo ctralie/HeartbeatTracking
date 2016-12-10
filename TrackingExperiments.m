@@ -22,11 +22,11 @@ DEBUGCIRCULARPATCHES = 0;
 
 %Video parameters
 PatchSize = 20;
-DOAFFINEWARP = 0;
+DOAFFINEWARP = 1;
 
 %Processing Parameters
 BlockLenSec = 5;
-BlockHopSec = 0.5;
+BlockHopSec = 0.1;
 lowranklambda = 0; %Do a low rank approximation of the patch time series?
 
 
@@ -34,7 +34,7 @@ lowranklambda = 0; %Do a low rank approximation of the patch time series?
 
 %% Video loading / Keypoint Detection / Setting Up Patch Regions
 %Step 1: Configure video to be loaded
-%[I, files, refFrame, Fs, GTPR] = getCVPR2014Video(4, 400);
+%VideoLoader = @(i1, i2) getCVPR2014Video(4, i1, i2);
 VideoLoader = @(i1, i2) getBUVideo(0, 'F013/T1', i1, i2);
 
 %Load the first frame just to get the sample rate and the total number of
@@ -64,6 +64,8 @@ else
     %Otherwise, only the first frame is needed to determine regions
     Keypoints = getKeypointsDlib(files(1));
 end
+lm = Keypoints{1};%The first keypoints
+
 regions = getDlibFaceRegions(Keypoints{1});
 patches = getRegionPatchIndices(regions, size(refFrame), PatchSize);
 if PLOTPATCHES
@@ -81,7 +83,7 @@ open(VWarpedWriter);
 
 %Step 3: If enabled, affine warp all frames to the first frame
 if DOAFFINEWARP
-    I = doAffineWarpVideo(I, refFrame, Keypoints, VWarpedWriter, DOWARPPLOT, 0);
+    I = doAffineWarpVideo(I, refFrame, lm, Keypoints, VWarpedWriter, DOWARPPLOT, 0);
 end
 
 
@@ -119,8 +121,8 @@ for kk = 1:NBlocks
         hopOffset = BlockHop*(kk-1);
         ret = VideoLoader(lastIdx+1, lastIdx+BlockHop);
         if DOAFFINEWARP
-            Keypoints = getKeypointsDlib(files);
-            ret.I = doAffineWarpVideo(ret.I, refFrame, Keypoints, VWarpedWriter, DOWARPPLOT, lastIdx+1);
+            Keypoints = getKeypointsDlib(ret.files);
+            ret.I = doAffineWarpVideo(ret.I, refFrame, lm, Keypoints, VWarpedWriter, DOWARPPLOT, lastIdx+1);
         end
         I = [I; ret.I];
         lastIdx = lastIdx + BlockHop;
@@ -196,7 +198,7 @@ end %End block loop
 
 %Plot performance against ground truth
 clf;
-ts = (1:length(KumarRates))*BlockHopSec;
+ts = (1:length(KumarRates))*BlockHop/Fs;
 plot(ts, KumarRates, 'b');
 hold on;
 ts = (1:length(GTPR))/1000.0;

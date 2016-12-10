@@ -1,14 +1,13 @@
-function [ I ] = doAffineWarpVideo( I, refFrame, Keypoints, V, DOWARPPLOT, warpoffset )
+function [ I ] = doAffineWarpVideo( I, refFrame, lm, Keypoints, V, DOWARPPLOT, warpoffset )
     if nargin < 5
         DOWARPPLOT = 0;
     end
-    lm = Keypoints{1};
     xr = [min(lm(:, 1)), max(lm(:, 1))];
     yr = [min(lm(:, 2)), max(lm(:, 2))];
     %Do affine warping of all frames
     %First calculate the triangle indices and barycentric coordinates
     %of pixel locations in the original frame
-    D1 = delaunayTriangulation(Keypoints{1});
+    D1 = delaunayTriangulation(lm);
     [X, Y] = meshgrid(1:size(refFrame, 2), 1:size(refFrame, 1));
     P = [X(:) Y(:)];
     triIdx = D1.pointLocation(P);

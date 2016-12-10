@@ -36,7 +36,9 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     %Step 2: Estimage goodness of regions
     %Figure out frequency index range of pulse window
     PRL = floor(1 + ((bpmCoarse - bWin)/60)*(N/Fs));
+    PRL = max(1, PRL);
     PRH = ceil(1 + ((bpmCoarse + bWin)/60)*(N/Fs));
+    PRH = min(PRH, size(X, 2));
     %Figure out frequency index range of passband
     BPL = floor(1 + fl*N/Fs);
     BPH = floor(1 + fh*N/Fs);
@@ -47,7 +49,9 @@ function [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, f
     PSD = (1/(Fs*N)) * abs(PSD).^2;
     a = sum(PSD(:, PRL:PRH), 2);
     b = sum(PSD(:, BPL:BPH), 2);
-    G = a./(a+b);
+    denom = a + b;
+    denom(denom == 0) = 1;
+    G = a./denom;
     G = G.*(XRange < Ath);
     
     %Step 3: Compute Final Estimate Based on Updated Goodness of Fit

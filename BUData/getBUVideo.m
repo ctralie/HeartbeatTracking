@@ -13,6 +13,19 @@ function [ ret ] = getBUVideo(First10Or30, subjectDir, i1, i2)
         imgPrefix = 'BUData/T10_T11_30Subjects';
         gtPrefix = 'BUData/T10_T11_30PhyBPHRData';
     end
+    %Count the number of frames actually in this video
+    filesDir = dir(imgpath);
+    NFrames = 0; %Figure out number of files
+    for ii = 1:length(filesDir)
+        [~, ~, fext] = fileparts(filesDir(ii).name);
+        if strcmp(fext, '.jpg') == 1
+            NFrames = NFrames + 1;
+        end
+    end
+    ret = struct();
+    ret.NFrames = NFrames;
+    i2 = min(i2, NFrames);
+    
     %Load ground truth pulse rate
     gtFilename = sprintf('%s/%s/Pulse Rate_BPM.txt', gtPrefix, subjectDir);
     GTPR = load(gtFilename);
@@ -22,6 +35,7 @@ function [ ret ] = getBUVideo(First10Or30, subjectDir, i1, i2)
     imgpath = sprintf('%s/%s', imgPrefix, subjectDir);
     NFrames = i2-i1+1;
 
+    %Load in video frames
     files = cell(1, NFrames);
     for ii = 1:NFrames
         filename = sprintf('%s/%.3i.jpg', imgpath, i1+ii-1);
@@ -35,22 +49,10 @@ function [ ret ] = getBUVideo(First10Or30, subjectDir, i1, i2)
         I(ii, :) = frame(:);
     end
     
-    %Count the number of frames actually in this video
-    filesDir = dir(imgpath);
-    NFrames = 0; %Figure out number of files
-    for ii = 1:length(filesDir)
-        [~, ~, fext] = fileparts(filesDir(ii).name);
-        if strcmp(fext, '.jpg') == 1
-            NFrames = NFrames + 1;
-        end
-    end
-    
-    ret = struct();
     ret.I = I;
     ret.files = files;
     ret.refFrame = refFrame;
     ret.Fs = Fs;
     ret.GTPR = GTPR;
-    ret.NFrames = NFrames;
 end
 

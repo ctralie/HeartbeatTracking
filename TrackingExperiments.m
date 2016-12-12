@@ -18,7 +18,6 @@ PLOTPATCHES = 1;
 PLOTBANDPASSFILTERS = 0;
 DEBUGKUMAR = 1;
 DEBUGCIRCULAR = 0;
-DEBUGCIRCULARPATCHES = 0;
 
 %Video parameters
 PatchSize = 20;
@@ -108,6 +107,8 @@ bpfilter = fir1(floor(BlockLen/3.1),[minfq maxfq]);
 
 %% Loop Through Blocks And Do Heartrate Estimates
 KumarRates = zeros(1, NBlocks);
+thetas1 = zeros(NBlocks, BlockLen-W+1);
+thetas2 = zeros(NBlocks, BlockLen-W+1);
 lastIdx = BlockLen;
 
 for kk = 1:NBlocks
@@ -182,18 +183,23 @@ for kk = 1:NBlocks
     %Subtract off mean of each patch
     X = bsxfun(@minus, X, mean(X, 2));
     
-    %Step 2: Apply different tracking techniques to each block
-    %Kumar Technique
-    if DEBUGKUMAR
-        [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
-    else
-        [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
-    end
-    KumarRates(kk) = bpmFinal;
+%     %Step 2: Apply different tracking techniques to each block
+%     %Kumar Technique
+%     if DEBUGKUMAR
+%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
+%     else
+%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
+%     end
+%     KumarRates(kk) = bpmFinal;
     
     %Circular coordinates technique;
-	%[bpmFinal, rates, scores, AllDs] = TrackCircularCoordinates(X, Fs, W, Kappa, refFrame, patches, sprintf('Circular%i', kk), sprintf('Circular%i', kk), hopOffset);
-
+    DebugStr = -1;
+    if DEBUGCIRCULAR
+        DebugStr = sprintf('Circular%i', kk);
+    end
+    [theta1, theta2] = TrackCircularCoordinates(X, Fs, W, Kappa, DebugStr, hopOffset);
+    thetas1(kk, :) = theta1;
+    thetas2(kk, :) = theta2;
 end %End block loop
 
 %Plot performance against ground truth

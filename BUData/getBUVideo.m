@@ -13,6 +13,7 @@ function [ ret ] = getBUVideo(First10Or30, subjectDir, i1, i2)
         imgPrefix = 'BUData/T10_T11_30Subjects';
         gtPrefix = 'BUData/T10_T11_30PhyBPHRData';
     end
+    imgpath = sprintf('%s/%s', imgPrefix, subjectDir);
     %Count the number of frames actually in this video
     filesDir = dir(imgpath);
     NFrames = 0; %Figure out number of files
@@ -32,7 +33,6 @@ function [ ret ] = getBUVideo(First10Or30, subjectDir, i1, i2)
     % Load Video
     Fs = 25; %According to docs, framerate for RGB is 25/s, framerate for heartrate is 1000/s
     refFrame = 0;
-    imgpath = sprintf('%s/%s', imgPrefix, subjectDir);
     NFrames = i2-i1+1;
 
     %Load in video frames

@@ -16,7 +16,7 @@ addpath(genpath('exact_alm_rpca')); %RPCA Code
 DOWARPPLOT = 0;
 PLOTPATCHES = 1;
 PLOTBANDPASSFILTERS = 0;
-DEBUGKUMAR = 1;
+DEBUGKUMAR = 0;
 DEBUGCIRCULAR = 0;
 
 %Video parameters
@@ -183,14 +183,14 @@ for kk = 1:NBlocks
     %Subtract off mean of each patch
     X = bsxfun(@minus, X, mean(X, 2));
     
-%     %Step 2: Apply different tracking techniques to each block
-%     %Kumar Technique
-%     if DEBUGKUMAR
-%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
-%     else
-%         [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
-%     end
-%     KumarRates(kk) = bpmFinal;
+    %Step 2: Apply different tracking techniques to each block
+    %Kumar Technique
+    if DEBUGKUMAR
+        [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh, sprintf('Kumar%i', kk), patches, hopOffset);
+    else
+        [bpmFinal, freq, PFinal] = TrackKumar(X, Fs, Ath, bWin, refFrame, t1, fl, fh);
+    end
+    KumarRates(kk) = bpmFinal;
     
     %Circular coordinates technique;
     DebugStr = -1;
@@ -202,11 +202,18 @@ for kk = 1:NBlocks
     thetas2(kk, :) = theta2;
 end %End block loop
 
+%Aggregate circular coordinate estimates
+thetaFinal = mergeCircularCoordinates(thetas1, thetas2, BlockHop, Fs, fl, fh);
+circCoordsHeartrate = getSlopes(thetaFinal, round(Fs/2));
+
+
 %Plot performance against ground truth
 clf;
 ts = (1:length(KumarRates))*BlockHop/Fs;
 plot(ts, KumarRates, 'b');
 hold on;
+plot((1:length(circCoordsHeartrate))/Fs, circCoordsHeartrate*Fs/(2*pi)*60);
+
 ts = (1:length(GTPR))/1000.0;
 plot(ts, GTPR, 'r');
 xlabel('Time');

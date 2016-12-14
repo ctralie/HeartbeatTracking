@@ -10,9 +10,8 @@ function [theta1, theta2] = TrackCircularCoordinates(X, Fs, W, Kappa, DebugStr, 
     AllDs = zeros(NPatches, M^2);
     
     %Step 1: Compute all normalized delay SSMs
-    for pp = 1:NPatches
+    parfor pp = 1:NPatches
         J = X(pp, :);
-        JOrig = J;
         %D = pdist2(J(:), J(:));
 
         J = getDelayEmbedding(J(:), W);
@@ -43,7 +42,7 @@ function [theta1, theta2] = TrackCircularCoordinates(X, Fs, W, Kappa, DebugStr, 
     if DebugStr ~= -1
         clf;
         subplot(331);
-        t = (1:length(JOrig))/Fs + hopOffset/Fs;
+        t = (1:NFrames)/Fs + hopOffset/Fs;
         plot(t, mean(X, 1));
         xlim([t(1), t(end)]);
         title('Mean time series');

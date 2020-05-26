@@ -117,6 +117,56 @@ def test_tri_idx():
         print(idx)
     print(tri.find_simplex(x))
 
+def clamp_bbox(bbox, shape):
+    """
+    Clamp a bounding box to the dimensions of an array
+    Parameters
+    ----------
+    bbox: ndarray([i1, i2, j1, j2])
+        A bounding box
+    shape: tuple
+        Dimensions to which to clamp
+    """
+    [i1, i2, j1, j2] = bbox
+    j1 = max(0, int(j1))
+    i1 = max(0, int(i1))
+    j2 = min(shape[1]-1, int(j2))
+    i2 = min(shape[0]-1, int(i2))
+    bbox[0:4] = [i1, i2, j1, j2]
+    return bbox
+
+def expand_bbox(bbox, pad, shape):
+    """
+    Expand a bounding box by a certain factor
+    in all directions
+    Parameters
+    ----------
+    bbox: ndarray([i1, i2, j1, j2])
+        A bounding box
+    pad: float
+        The fraction by which to expand (>0 is bigger, <0 is smaller)
+    shape: tuple
+        Dimensions to which to clamp
+    """
+    [i1, i2, j1, j2] = bbox
+    width = j2-j1+1
+    height = i2-i1+1
+    i1 -= pad*height
+    i2 += pad*height
+    j1 -= pad*width
+    j2 += pad*width
+    bbox[0:4] = [i1, i2, j1, j2]
+    return clamp_bbox(bbox, shape)
+
+def add_bbox_to_keypoints(keypoints, bbox):
+    """
+    Create a new set of keypoints with corners of the
+    bounding box
+    """
+    [i1, i2, j1, j2] = bbox
+    corners = np.array([[j1, i1], [j1, i2], [j2, i2], [j2, i1]])
+    return np.concatenate((keypoints, corners), axis=0)
+
 if __name__ == '__main__':
     #test_barycentric_tri()
     test_tri_idx()

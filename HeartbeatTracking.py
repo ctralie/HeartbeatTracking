@@ -58,6 +58,22 @@ def get_video_filepaths(path):
     return files
 
 
+def get_frames_bbox(frames):
+    """
+    Get the union of all bounding boxes in all of the frames
+    Parameters
+    ----------
+    frames: list of MorphableFace
+        The frames
+    """
+    bbox = np.zeros(4)
+    if len(frames) > 0:
+        bbox = frames[0].get_bbox()
+        for f in frames[1::]:
+            bbox = bbox_union(bbox, f.get_bbox())
+    return bbox
+    
+
 def track_heartbeat(path, win, hop):
     """
     Parameters
@@ -69,5 +85,49 @@ def track_heartbeat(path, win, hop):
     hop: int
         The number of frames to jump in between each window
     """
-    pass
+    files = get_video_filepaths(path)
+    files = files[0:win]
+    if len(files) < win:
+        print("Not enough files to fill first window")
+        return
+    istart = 0
+    print("Loading window...")
+    frames = [MorphableFace(files[i]) for i in range(win)]
+    print("Computing facial landmarks...")
+    for f in frames:
+        tic = time.time()
+        f.get_face_keypts()
+        print("Elapsed time ", time.time()-tic)
+    while istart + win <= len(files):
+        ## Step 2: Setup common bounding box for all frames
+        print("Setting up grids...")
+        bbox = get_frames_bbox(frames)
+        for f in frames:
+            f.setup_grid(bbox)
 
+        ## Step 3: Warp all frames to the first frame
+        print("Warping frames...")
+        f0 = frames[0]
+        images = [f0.img]
+        for f in frames[1::]:
+            images.append(f.get_forward_map(f0.XKey))
+        plt.figure(figsize=(12, 6))
+        for i, (f, img) in enumerate(zip(frames, images)):
+            plt.clf()
+            plt.subplot(121)
+            plt.imshow(f.img)
+            plt.title("Frame {}".format(i))
+            plt.subplot(122)
+            plt.imshow(img)
+            plt.savefig("{}.png".format(i))
+
+        ## Slide window to the right
+        istart += hop
+        if istart + win <= len(files):
+            print("Loading window...")
+            # Shift frames over and load in the frames for the next loop
+            frames[0:win-hop] = frames[hop::]
+            for i in range(hop):
+                frames[win-hop+i] = MorphableFace(files[istart+i])
+
+track_heartbeat("CVPR2014Data/1", 10*30, 10)

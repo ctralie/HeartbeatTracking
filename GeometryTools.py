@@ -158,6 +158,20 @@ def expand_bbox(bbox, pad, shape):
     bbox[0:4] = [i1, i2, j1, j2]
     return clamp_bbox(bbox, shape)
 
+def bbox_union(bbox1, bbox2):
+    """
+    Compute the union of two bounding boxes
+    Parameters
+    ----------
+    bbox1: ndarray([i1, i2, j1, j2])
+        First bounding box
+    bbox2: ndarray([i1, i2, j1, j2])
+        Second bounding box
+    """
+    i1, j1 = np.minimum(bbox1[[0, 2]], bbox2[[0, 2]])
+    i2, j2 = np.maximum(bbox1[[1, 3]], bbox2[[1, 3]])
+    return np.array([i1, i2, j1, j2])
+
 def add_bbox_to_keypoints(keypoints, bbox):
     """
     Create a new set of keypoints with corners of the

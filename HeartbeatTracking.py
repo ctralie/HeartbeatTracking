@@ -74,7 +74,7 @@ def get_frames_bbox(frames):
     return bbox
     
 
-def track_heartbeat(path, win, hop):
+def track_heartbeat(path, win, hop, debug=False):
     """
     Parameters
     ---------
@@ -85,20 +85,39 @@ def track_heartbeat(path, win, hop):
     hop: int
         The number of frames to jump in between each window
     """
+    import cv2
+    # Parameters for lucas kanade optical flow
+    # From OpenCV tutorial https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_video/py_lucas_kanade/py_lucas_kanade.html
+    lk_params = dict( winSize  = (15,15),
+                    maxLevel = 2,
+                    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
     files = get_video_filepaths(path)
-    files = files[0:win]
     if len(files) < win:
         print("Not enough files to fill first window")
         return
     istart = 0
-    print("Loading window...")
-    frames = [MorphableFace(files[i]) for i in range(win)]
-    print("Computing facial landmarks...")
-    for f in frames:
-        tic = time.time()
-        f.get_face_keypts()
-        print("Elapsed time ", time.time()-tic)
+    win_num = 1
     while istart + win <= len(files):
+        ## Step 0: Load in images
+        print("Loading window...")
+        frames = [MorphableFace(files[i+istart]) for i in range(win)]
+
+        ## Step 1: Track frames
+        print("Tracking...")
+        frames[0].get_face_keypts()
+        frames[0].exclude_landmarks([LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS])
+        last_img = cv2.cvtColor(frames[0].img, cv2.COLOR_RGB2GRAY)
+        p0 = np.array(frames[0].XKey, dtype=np.float32)
+        for i, f in enumerate(frames[1::]):
+            this_img = cv2.cvtColor(f.img, cv2.COLOR_RGB2GRAY)
+            # calculate optical flow
+            p1, _, _ = cv2.calcOpticalFlowPyrLK(last_img, this_img, p0, None, **lk_params)
+            f.XKey = p1
+            # Now update the previous frame and previous points
+            last_img = this_img.copy()
+            p0 = p1
+
         ## Step 2: Setup common bounding box for all frames
         print("Setting up grids...")
         bbox = get_frames_bbox(frames)
@@ -109,25 +128,20 @@ def track_heartbeat(path, win, hop):
         print("Warping frames...")
         f0 = frames[0]
         images = [f0.img]
-        for f in frames[1::]:
-            images.append(f.get_forward_map(f0.XKey))
         plt.figure(figsize=(12, 6))
-        for i, (f, img) in enumerate(zip(frames, images)):
+        for i, f in enumerate(frames[1::]):
+            images.append(f.get_forward_map(f0.XKey))
             plt.clf()
             plt.subplot(121)
             plt.imshow(f.img)
             plt.title("Frame {}".format(i))
             plt.subplot(122)
-            plt.imshow(img)
+            plt.imshow(images[-1])
             plt.savefig("{}.png".format(i))
+        subprocess.call(["ffmpeg", "-i", "%d.png", "-b", "1000k", "{}.ogg".format(win_num)])
 
-        ## Slide window to the right
         istart += hop
-        if istart + win <= len(files):
-            print("Loading window...")
-            # Shift frames over and load in the frames for the next loop
-            frames[0:win-hop] = frames[hop::]
-            for i in range(hop):
-                frames[win-hop+i] = MorphableFace(files[istart+i])
+        win_num += 1
 
-track_heartbeat("CVPR2014Data/1", 10*30, 10)
+#"BUData/T10_T11_30Subjects/F024/T11"
+track_heartbeat("BUData/first10subjects_2D/F013/T1", 150, 25)

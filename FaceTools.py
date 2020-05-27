@@ -57,9 +57,9 @@ class MorphableFace(object):
         self.XKeyWBbox = add_bbox_to_keypoints(self.XKey, bbox)
         self.tri = Delaunay(self.XKeyWBbox)
         X, Y = np.meshgrid(self.pixx, self.pixy)
-        XGrid = np.array([X.flatten(), Y.flatten()], dtype=np.float).T
-        self.idxs = self.tri.find_simplex(XGrid)
-        self.bary = get_barycentric(XGrid, self.idxs, self.tri, self.XKeyWBbox)
+        self.XGrid = np.array([X.flatten(), Y.flatten()], dtype=np.float).T
+        self.idxs = self.tri.find_simplex(self.XGrid)
+        self.bary = get_barycentric(self.XGrid, self.idxs, self.tri, self.XKeyWBbox)
         self.colors = self.img[bbox[0]:bbox[1]+1, bbox[2]:bbox[3]+1, :]/255.0
 
 
@@ -111,6 +111,8 @@ class MorphableFace(object):
         [i1, i2, j1, j2] = self.bbox
         XKey2WBbox = add_bbox_to_keypoints(XKey2, self.bbox)
         XGrid2 = barycentric_to_euclidean(self.idxs, self.tri, XKey2WBbox, self.bary)
+        diff = XGrid2 - self.XGrid
+        XGrid2 = self.XGrid - diff
         XGrid2 = np.fliplr(XGrid2)
         # Numerical precision could cause coords to be out of bounds
         XGrid2[XGrid2[:, 0] <= np.min(self.pixy), 0] = np.min(self.pixy)

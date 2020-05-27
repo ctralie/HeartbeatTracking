@@ -1,11 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, ConvexHull
 
 def getCSM(X, Y):
     XSqr = np.sum(X**2, 1)
     YSqr = np.sum(Y**2, 1)
     return XSqr[:, None] + YSqr[None, :] - 2*X.dot(Y.T)
+
+##########################################################
+##       DELAUNAY/PIECEWISE AFFINE UTILITIES            ##
+##########################################################
 
 def get_barycentric(X, idxs, tri, XTri):
     """
@@ -116,6 +120,62 @@ def test_tri_idx():
         idx = get_triangle_idx(X, tri.simplices, x[k, :])
         print(idx)
     print(tri.find_simplex(x))
+
+
+##########################################################
+##               BINARY MASK UTILITIES                  ##
+##########################################################
+
+def get_mask(XLand, shape, fuzz = 0):
+    """
+    Compute a binary mask image based on the convex hull
+    of a set of landmarks
+    Parameters
+    ----------
+    XLand: ndarray(M, 2)
+        A set of M landmarks.  x coordinates in first column,
+        y coordinates in second column
+    shape: (Height, Width)
+        Dimensions of the mask
+    fuzz: float
+        Amount by which to expand mask around convex hull
+    """
+    X, Y = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
+    Y = np.array([X.flatten(), Y.flatten()]).T
+    hull = ConvexHull(XLand)
+    ns = hull.equations[:, 0:2]
+    ps = hull.equations[:, 2].flatten()
+    ds = Y.dot(ns.T) + ps[None, :]
+    inside = np.sum(ds < fuzz, 1) == ds.shape[1]
+    inside = np.reshape(inside, (shape[0], shape[1]))
+    return inside
+
+def get_block_pixel_indices(X, block_size):
+    """
+    Given the locations of the upper left of blocks and the block dimensions,
+    return an array of row/column indices of all pixels in the blocks
+    Parameters
+    ----------
+    X: ndarray(M, 2)
+        Row/column indices of upper left corners of M blocks
+    block_size: int
+        The dimension of the block
+    Returns
+    -------
+    Y: ndarray(M, block_size^2, 2)
+        Index 0: Block, Index 1: pixels in block, Index 2: row/col
+    """
+    pix = np.arange(block_size)
+    pixj, pixi = np.meshgrid(pix, pix)
+    block = np.array([pixi.flatten(), pixj.flatten()])
+    Y = X[:, :, None] + block[None, :, :]
+    Y = np.swapaxes(Y, 1, 2)
+    return Y
+
+
+##########################################################
+##              BOUNDING BOX UTILITIES                  ##
+##########################################################
 
 def clamp_bbox(bbox, shape):
     """

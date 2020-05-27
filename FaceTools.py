@@ -9,7 +9,13 @@ predictor_path = "shape_predictor_68_face_landmarks.dat"
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor(predictor_path)
 
-eyebrow_idx = np.concatenate((np.arange(17, 22), np.arange(22, 27)))
+LEFT_EYE_LANDMARKS = np.arange(36, 42)
+LEFT_EYEBROW_LANDMARKS = np.arange(17, 22)
+RIGHT_EYE_LANDMARKS = np.arange(42, 48)
+RIGHT_EYEBROW_LANDMARKS = np.arange(22, 27)
+NOSE_LANDMARKS = np.arange(27, 36)
+MOUTH_LANDMARKS = np.arange(48, 67)
+EYEBROW_LANDMARKS = np.arange(17, 27)
 
 def shape_to_np(shape, dtype="int"):
     """
@@ -61,22 +67,24 @@ class MorphableFace(object):
         self.colors = self.img[bbox[0]:bbox[1]+1, bbox[2]:bbox[3]+1, :]/255.0
 
 
-    def get_face_keypts(self, pad = 0.1):
+    def get_face_keypts(self, add_forehead = True, add_neck = True):
         """
         Return the keypoints of the first face detected in the image
         Parameters
         ----------
         img: ndarray(M, N, 3)
             An RGB image which contains at least one face
-        pad: float (default 0.1)
-            The factor by which to pad the bounding box of the facial landmarks
-            by the 4 additional landmarks
-        
         Returns
         -------
         XKey: ndarray(71, 2)
             Locations of the facial landmarks.  Last 4 are 4 corners
             of the expanded bounding box
+        add_forehead: boolean
+            Whether to add 3 points on the forehead based on some
+            bounding landmarks on the face
+        add_neck: boolean
+            Whether to add 2 points on the neck based on some bounding
+            landmarks around the jaw
         """
 
         # Ask the detector to find the bounding boxes of each face. The 1 in the
@@ -87,7 +95,24 @@ class MorphableFace(object):
         # Get the landmarks/parts for the face in box d.
         shape = predictor(self.img, d)
         XKey = shape_to_np(shape)
-        # Add four points in a square around the face
+        # Add three landmarks for the forehead
+        if add_forehead:
+            x1 = XKey[0, :]
+            x2 = XKey[16, :]
+            m = x2 - x1
+            n = np.array([m[1], -m[0]])
+            x1 = x1 + 0.3*n
+            x2 = x2 + 0.3*n
+            x3 = 0.5*(x1 + x2) + 0.1*n
+            XKey = np.concatenate((XKey, x1[None, :], x2[None, :], x3[None, :]), axis=0)
+        # Add two landmarks on the neck
+        if add_neck:
+            x1 = XKey[5, :]
+            x2 = XKey[11, :]
+            n = np.array([-m[1], m[0]])
+            x1 = x1 + 0.3*n
+            x2 = x2 + 0.3*n
+            XKey = np.concatenate((XKey, x1[None, :], x2[None, :]), axis=0)
         self.XKey = XKey
         return self.XKey
     
@@ -112,13 +137,7 @@ class MorphableFace(object):
         Js = np.arange(0, img.shape[1], block_size)
         Js, Is = np.meshgrid(Js, Is)
         X = np.array([Is.flatten(), Js.flatten()]).T
-        pix = np.arange(block_size)
-        pixj, pixi = np.meshgrid(pix, pix)
-        block = np.array([pixi.flatten(), pixj.flatten()])
-        # Index 0: Block, Index 1: row/col, Index 2: pixels in block
-        Y = X[:, :, None] + block[None, :, :]
-        # Index 0: Block, Index 1: pixels in block, Index 2: row/col
-        Y = np.swapaxes(Y, 1, 2)
+        Y = get_block_pixel_indices(X, block_size)
         shape = Y.shape
         Y = np.reshape(Y, (shape[0]*shape[1], shape[2]))
 
@@ -130,10 +149,7 @@ class MorphableFace(object):
         inside = np.sum(ds < 0, 1) == ds.shape[1]
         inside = np.reshape(inside, (shape[0], shape[1]))
         inside = np.sum(inside, 1) > 0
-        Y = np.reshape(Y, shape)
         return X[inside, :]
-        
-
     
     def get_forward_map(self, XKey2):
         """
@@ -168,16 +184,54 @@ class MorphableFace(object):
             imgret[i1:i2+1, j1:j2+1, c] = np.reshape(interpbox, shape)
         return imgret
 
-    def plotKeypoints(self, drawLandmarks = True, drawTriangles = False):
+    def get_good_points_to_track(self):
+        import cv2
+        mask = get_mask(self.XKey, self.img.shape)
+        for region_idx in [LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS, NOSE_LANDMARKS, MOUTH_LANDMARKS]:
+            region = self.XKey[region_idx, :]
+            maskr = get_mask(region, self.img.shape, fuzz=5)
+            mask = mask^maskr
+        mask[mask < 0] = 0
+        mask = np.array(mask, dtype=np.uint8)
+        
+        gray = cv2.cvtColor(self.img, cv2.COLOR_RGB2GRAY)
+        feature_params = dict( maxCorners = 1000,
+                            qualityLevel = 0.01,
+                            minDistance = 10,
+                            blockSize = 7,
+                            gradientSize = 7 )
+        p0 = cv2.goodFeaturesToTrack(gray, mask=mask, **feature_params)
+        return p0
+
+
+
+    def plotKeypoints(self, drawLandmarks = True, numberLandmarks = False, drawTriangles = False):
         """
         Plot the image with the keypoints superimposed
         """
         plt.imshow(self.img)
         if drawLandmarks:
-            plt.scatter(self.XKeyWBbox[:, 0], self.XKeyWBbox[:, 1])
+            plt.scatter(self.XKey[:, 0], self.XKey[:, 1])
+        if numberLandmarks:
+            for i in range(self.XKey.shape[0]):
+                plt.text(self.XKey[i, 0], self.XKey[i, 1], "{}".format(i))
         if drawTriangles:
             plt.triplot(self.XKeyWBbox[:, 0], self.XKeyWBbox[:, 1], self.tri.simplices)
 
+
+def test_flow():
+    filename = "CVPR2014Data/1/00001.jpg"
+    face = MorphableFace(filename)
+    face.get_face_keypts()
+    face.plotKeypoints(numberLandmarks=True)
+    plt.show()
+    bbox = face.get_bbox()
+    p0 = face.get_good_points_to_track()
+    plt.imshow(face.img)
+    plt.scatter(p0[:, 0, 0], p0[:, 0, 1])
+    plt.xlim(bbox[2], bbox[3])
+    plt.ylim(bbox[1], bbox[0])
+    plt.show()
 
 def test_delaunay(filename):
     face = MorphableFace(filename)
@@ -224,4 +278,5 @@ def test_warp(filename):
 
 if __name__ == '__main__':
     filename = "CVPR2014Data/1/00001.jpg"
-    test_delaunay(filename)
+    #test_delaunay(filename)
+    test_flow()

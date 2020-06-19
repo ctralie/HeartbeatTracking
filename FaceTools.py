@@ -11,8 +11,13 @@ predictor = dlib.shape_predictor(predictor_path)
 
 LEFT_EYE_LANDMARKS = np.arange(36, 42)
 LEFT_EYEBROW_LANDMARKS = np.arange(17, 22)
+LEFT_EYE_FULL_LANDMARKS = np.concatenate((LEFT_EYE_LANDMARKS, LEFT_EYEBROW_LANDMARKS))
+
 RIGHT_EYE_LANDMARKS = np.arange(42, 48)
 RIGHT_EYEBROW_LANDMARKS = np.arange(22, 27)
+RIGHT_EYE_FULL_LANDMARKS = np.concatenate((RIGHT_EYE_LANDMARKS, RIGHT_EYEBROW_LANDMARKS))
+
+
 NOSE_LANDMARKS = np.arange(27, 36)
 MOUTH_LANDMARKS = np.arange(48, 67)
 EYEBROW_LANDMARKS = np.arange(17, 27)
@@ -46,7 +51,7 @@ class MorphableFace(object):
         j2, i2 = np.ceil(np.max(self.XKey, axis=0))
         return clamp_bbox(np.array([i1, i2, j1, j2], dtype=int), self.img.shape)
 
-    def setup_grid(self, bbox):
+    def setup_grid(self, bbox, simplices=np.array([])):
         """
         Setup a grid given a bounding box, and compute triangle
         indices and barycentric coordinates on this grid
@@ -54,12 +59,17 @@ class MorphableFace(object):
         ----------
         bbox: ndarray([i1, i2, j1, j2])
             A bounding box
+        simplices: ndarray(N, 3, dtype=int)
+            An array of simplices to use in the triangulation
+            (If left blank, the Delaunay triangulation will be used)
         """
         self.bbox = bbox
         self.pixx = np.arange(bbox[2], bbox[3]+1)
         self.pixy = np.arange(bbox[0], bbox[1]+1)
         self.XKeyWBbox = add_bbox_to_keypoints(self.XKey, bbox)
         self.tri = Delaunay(self.XKeyWBbox)
+        if simplices.size > 0:
+            self.tri.simplices = simplices
         X, Y = np.meshgrid(self.pixx, self.pixy)
         self.XGrid = np.array([X.flatten(), Y.flatten()], dtype=np.float).T
         self.idxs = self.tri.find_simplex(self.XGrid)
@@ -116,6 +126,28 @@ class MorphableFace(object):
         self.XKey = XKey
         return self.XKey
     
+    def add_keypts(self, p):
+        """
+        Append a set of landmarks on top of the ones that are
+        already there
+        """
+        self.XKey = np.concatenate((self.XKey, p), axis=0)
+
+    def exclude_landmarks(self, land_list):
+        """
+        Exclude a set of landmarks from the list of landmarks
+        Parameters
+        ----------
+        land_list: list of ndarray(dtype=int)
+            List of sets of landmarks to exlude
+        """
+        idx = np.array([], dtype=int)
+        for idxi in land_list:
+            idx = np.concatenate((idx, idxi))
+        tokeep = np.ones(self.XKey.shape[0])
+        tokeep[idx] = 0
+        self.XKey = self.XKey[tokeep == 1, :]
+
     def get_blocks(self, block_size):
         """
         Return indices of the upper left corners of blocks
@@ -184,53 +216,55 @@ class MorphableFace(object):
             imgret[i1:i2+1, j1:j2+1, c] = np.reshape(interpbox, shape)
         return imgret
 
-    def get_good_points_to_track(self):
+    def get_good_points_to_track(self, maxCorners = 1000, qualityLevel = 0.01,
+                                minDistance = 10, blockSize = 13, gradientSize = 13):
+        """
+        Use OpenCV to get good points to track
+        """
         import cv2
         mask = get_mask(self.XKey, self.img.shape)
-        for region_idx in [LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS, NOSE_LANDMARKS, MOUTH_LANDMARKS]:
+        for region_idx in [LEFT_EYE_FULL_LANDMARKS, RIGHT_EYE_FULL_LANDMARKS, NOSE_LANDMARKS, MOUTH_LANDMARKS]:
             region = self.XKey[region_idx, :]
-            maskr = get_mask(region, self.img.shape, fuzz=5)
+            maskr = get_mask(region, self.img.shape, fuzz=10)
             mask = mask^maskr
-        mask[mask < 0] = 0
         mask = np.array(mask, dtype=np.uint8)
         
         gray = cv2.cvtColor(self.img, cv2.COLOR_RGB2GRAY)
-        feature_params = dict( maxCorners = 1000,
-                            qualityLevel = 0.01,
-                            minDistance = 10,
-                            blockSize = 7,
-                            gradientSize = 7 )
+        feature_params = dict( maxCorners = maxCorners,
+                            qualityLevel = qualityLevel,
+                            minDistance = minDistance,
+                            blockSize = blockSize,
+                            gradientSize = gradientSize )
         p0 = cv2.goodFeaturesToTrack(gray, mask=mask, **feature_params)
+        p0 = np.reshape(p0, (p0.shape[0], 2))
         return p0
-
-
 
     def plotKeypoints(self, drawLandmarks = True, numberLandmarks = False, drawTriangles = False):
         """
         Plot the image with the keypoints superimposed
         """
         plt.imshow(self.img)
+        sz = 20
+        if drawTriangles:
+            plt.triplot(self.XKeyWBbox[:, 0], self.XKeyWBbox[:, 1], self.tri.simplices)
+            sz = 4
         if drawLandmarks:
-            plt.scatter(self.XKey[:, 0], self.XKey[:, 1])
+            plt.scatter(self.XKey[:, 0], self.XKey[:, 1], sz)
         if numberLandmarks:
             for i in range(self.XKey.shape[0]):
                 plt.text(self.XKey[i, 0], self.XKey[i, 1], "{}".format(i))
-        if drawTriangles:
-            plt.triplot(self.XKeyWBbox[:, 0], self.XKeyWBbox[:, 1], self.tri.simplices)
 
 
 def test_flow():
-    filename = "CVPR2014Data/1/00001.jpg"
+    filename = "BUData/first10subjects_2D/F013/T1/093.jpg"
     face = MorphableFace(filename)
     face.get_face_keypts()
-    face.plotKeypoints(numberLandmarks=True)
-    plt.show()
+    p = face.get_good_points_to_track()
+    face.add_keypts(p)
+    face.exclude_landmarks([LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS])
     bbox = face.get_bbox()
-    p0 = face.get_good_points_to_track()
-    plt.imshow(face.img)
-    plt.scatter(p0[:, 0, 0], p0[:, 0, 1])
-    plt.xlim(bbox[2], bbox[3])
-    plt.ylim(bbox[1], bbox[0])
+    face.setup_grid(bbox)
+    face.plotKeypoints(drawTriangles=True)
     plt.show()
 
 def test_delaunay(filename):
@@ -277,6 +311,6 @@ def test_warp(filename):
         plt.savefig("WarpTest%i.png"%f)
 
 if __name__ == '__main__':
-    filename = "CVPR2014Data/1/00001.jpg"
+    filename = "BUData/first10subjects_2D/F013/T1/000.jpg"
     #test_delaunay(filename)
     test_flow()

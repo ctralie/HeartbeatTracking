@@ -106,39 +106,62 @@ def track_heartbeat(path, win, hop, debug=False):
         ## Step 1: Track frames
         print("Tracking...")
         frames[0].get_face_keypts()
+        p = frames[0].get_good_points_to_track()
+        frames[0].add_keypts(p)
         frames[0].exclude_landmarks([LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS])
         last_img = cv2.cvtColor(frames[0].img, cv2.COLOR_RGB2GRAY)
         p0 = np.array(frames[0].XKey, dtype=np.float32)
+        idx = np.arange(p0.shape[0])
+        print("{} Points tracking".format(p0.shape[0]))
+        ps = [p0]
         for i, f in enumerate(frames[1::]):
+            # Documentation on optical flow:
+            # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_video/py_lucas_kanade/py_lucas_kanade.html
             this_img = cv2.cvtColor(f.img, cv2.COLOR_RGB2GRAY)
             # calculate optical flow
-            p1, _, _ = cv2.calcOpticalFlowPyrLK(last_img, this_img, p0, None, **lk_params)
-            f.XKey = p1
+            p1_idx, st, _ = cv2.calcOpticalFlowPyrLK(last_img, this_img, p0, None, **lk_params)
+            # Select subset of points that are tracked well
+            st = st.flatten()
+            p1_idx = p1_idx[st == 1]
+            idx = idx[st == 1]
+            p1 = np.zeros_like(p0)
+            p1[idx] = p1_idx
+            ps.append(p1)
             # Now update the previous frame and previous points
             last_img = this_img.copy()
-            p0 = p1
+            p0 = p1_idx
+        print("{} Points survived tracking".format(idx.size))
+        for i, p in enumerate(ps):
+            p = p[idx]
+            frames[i].XKey = p
 
         ## Step 2: Setup common bounding box for all frames
         print("Setting up grids...")
         bbox = get_frames_bbox(frames)
-        for f in frames:
+        for i, f in enumerate(frames):
+            print(i)
             f.setup_grid(bbox)
+            
 
         ## Step 3: Warp all frames to the first frame
         print("Warping frames...")
         f0 = frames[0]
         images = [f0.img]
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(18, 6))
         for i, f in enumerate(frames[1::]):
             images.append(f.get_forward_map(f0.XKey))
             plt.clf()
-            plt.subplot(121)
+            plt.subplot(131)
+            f.plotKeypoints(drawTriangles=True)
+            plt.xlim([bbox[2], bbox[3]])
+            plt.ylim([bbox[1], bbox[0]])
+            plt.subplot(132)
             plt.imshow(f.img)
             plt.title("Frame {}".format(i))
-            plt.subplot(122)
+            plt.subplot(133)
             plt.imshow(images[-1])
             plt.savefig("{}.png".format(i))
-        subprocess.call(["ffmpeg", "-i", "%d.png", "-b", "1000k", "{}.ogg".format(win_num)])
+        subprocess.call(["ffmpeg", "-i", "%d.png", "-b", "5000k", "{}.ogg".format(win_num)])
 
         istart += hop
         win_num += 1

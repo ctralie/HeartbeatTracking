@@ -114,6 +114,7 @@ def track_heartbeat(path, win, hop, debug=False):
         idx = np.arange(p0.shape[0])
         print("{} Points tracking".format(p0.shape[0]))
         ps = [p0]
+        N = p0.shape[0]
         for i, f in enumerate(frames[1::]):
             # Documentation on optical flow:
             # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_video/py_lucas_kanade/py_lucas_kanade.html
@@ -124,7 +125,7 @@ def track_heartbeat(path, win, hop, debug=False):
             st = st.flatten()
             p1_idx = p1_idx[st == 1]
             idx = idx[st == 1]
-            p1 = np.zeros_like(p0)
+            p1 = np.zeros((N, 2))
             p1[idx] = p1_idx
             ps.append(p1)
             # Now update the previous frame and previous points

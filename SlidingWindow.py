@@ -81,7 +81,7 @@ def normalizeWindows(X):
     XRet /= Norm[:, None]
     return XRet
 
-def getSlidingWindow(x, dim, Tau, dT):
+def getSlidingWindow(x, dim, Tau = 1, dT = 1):
     """
     Return a sliding window of a time series,
     using arbitrary sampling.  Use linear interpolation
@@ -101,6 +101,8 @@ def getSlidingWindow(x, dim, Tau, dT):
     X: ndarray(N, dim)
         All sliding windows stacked up
     """
+    if Tau == 1 and dT == 1:
+        return getSlidingWindowNoInterp(x, dim)
     N = len(x)
     NWindows = int(np.floor((N-dim*Tau)/dT))
     X = np.zeros((NWindows, dim))
@@ -310,9 +312,9 @@ class SlidingWindowAnimator(animation.FuncAnimation):
         self.rightLim.set_color(c)
         Y = self.Y
         if Y.shape[1] == 2:
-            self.ax2.scatter(Y[idxs, 0], Y[idxs, 1], c=c[None, :])
+            self.ax2.scatter(Y[idxs, 0], Y[idxs, 1], c=c)
         elif Y.shape[1] >= 3:
-            self.ax2.scatter(Y[idxs, 0], Y[idxs, 1], Y[idxs, 2], c=c[None, :])
+            self.ax2.scatter(Y[idxs, 0], Y[idxs, 1], Y[idxs, 2], c=c)
 
 
 def doSinesExample():
@@ -360,5 +362,5 @@ def doDetrendingExample():
     plt.show()
 
 if __name__ == '__main__':
-    #doSinesExample()
-    doDetrendingExample()
+    doSinesExample()
+    #doDetrendingExample()

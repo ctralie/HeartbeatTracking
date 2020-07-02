@@ -1,5 +1,7 @@
 from FaceTools import *
 from FundamentalFreq import *
+import scipy.io as sio
+from scipy.signal import sosfilt, sosfiltfilt, butter
 import os
 import glob
 import subprocess
@@ -72,9 +74,30 @@ def get_frames_bbox(frames):
         for f in frames[1::]:
             bbox = bbox_union(bbox, f.get_bbox())
     return bbox
-    
 
-def track_heartbeat(path, win, hop, debug=False):
+def bandpass_filter_timeseries(y, fs, nfilt = 10, fl=0.7, fh=4):
+    """
+    Apply a zero-phase Butterworth bandpass filter
+    Parameters
+    ----------
+    y: ndarray(N)
+        The signal to filter
+    fs: int
+        The samplerate
+    nfilt: int
+        Order of the bandpass filter
+    fl: float
+        Left cutoff of filter (in hz)
+    fr: float
+        Right cutoff of filter (in hz)
+    """
+    minfq = 2*fl/fs
+    maxfq = 2*fh/fs
+    sos = butter(nfilt, [minfq, maxfq], btype='bandpass', output='sos')
+    yfilt = sosfiltfilt(sos, y)
+    return yfilt
+
+def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, show_warps=False, show_block_timeseries = False):
     """
     Parameters
     ---------
@@ -84,6 +107,16 @@ def track_heartbeat(path, win, hop, debug=False):
         The number of frames in each window
     hop: int
         The number of frames to jump in between each window
+    fs: int
+        Sample rate of video
+    block_size: int
+        The dimension of each block that's averaged
+    fine_points: boolean
+        Whether to include fine scale good points to track
+    show_warps: boolean
+        Whether to save plots showing the warping
+    show_block_timeseries: boolean  
+        Whether to plot information about the time series in each block
     """
     import cv2
     # Parameters for lucas kanade optical flow
@@ -97,17 +130,18 @@ def track_heartbeat(path, win, hop, debug=False):
         print("Not enough files to fill first window")
         return
     istart = 0
-    win_num = 1
+    window_num = 1
     while istart + win <= len(files):
         ## Step 0: Load in images
-        print("Loading window...")
+        print("Loading block {}...".format(window_num))
         frames = [MorphableFace(files[i+istart]) for i in range(win)]
 
         ## Step 1: Track frames
         print("Tracking...")
         frames[0].get_face_keypts()
-        p = frames[0].get_good_points_to_track()
-        frames[0].add_keypts(p)
+        if fine_points:
+            p = frames[0].get_good_points_to_track()
+            frames[0].add_keypts(p)
         frames[0].exclude_landmarks([LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS])
         last_img = cv2.cvtColor(frames[0].img, cv2.COLOR_RGB2GRAY)
         p0 = np.array(frames[0].XKey, dtype=np.float32)
@@ -138,34 +172,70 @@ def track_heartbeat(path, win, hop, debug=False):
 
         ## Step 2: Setup common bounding box for all frames
         print("Setting up grids...")
+        tic = time.time()
         bbox = get_frames_bbox(frames)
         for i, f in enumerate(frames):
-            print(i)
             f.setup_grid(bbox)
+        print("Elapsed Time", time.time()-tic)
             
 
         ## Step 3: Warp all frames to the first frame
         print("Warping frames...")
+        tic = time.time()
         f0 = frames[0]
         images = [f0.img]
-        plt.figure(figsize=(18, 6))
+        if show_warps:
+            plt.figure(figsize=(18, 6))
         for i, f in enumerate(frames[1::]):
             images.append(f.get_forward_map(f0.XKey))
-            plt.clf()
-            plt.subplot(131)
-            f.plotKeypoints(drawTriangles=True)
-            plt.xlim([bbox[2], bbox[3]])
-            plt.ylim([bbox[1], bbox[0]])
-            plt.subplot(132)
-            plt.imshow(f.img)
-            plt.title("Frame {}".format(i))
-            plt.subplot(133)
-            plt.imshow(images[-1])
-            plt.savefig("{}.png".format(i))
-        subprocess.call(["ffmpeg", "-i", "%d.png", "-b", "5000k", "{}.ogg".format(win_num)])
+            if show_warps:
+                plt.clf()
+                plt.subplot(131)
+                f.plotKeypoints(drawTriangles=True)
+                plt.xlim([bbox[2], bbox[3]])
+                plt.ylim([bbox[1], bbox[0]])
+                plt.subplot(132)
+                plt.imshow(f.img)
+                plt.title("Frame {}".format(i))
+                plt.subplot(133)
+                plt.imshow(images[-1])
+                plt.savefig("{}.png".format(i))
+        if show_warps:
+            subprocess.call(["ffmpeg", "-i", "%d.png", "-b", "5000k", "{}.ogg".format(window_num)])
+        # Extract green channel only and stack up into numpy array
+        for i, image in enumerate(images):
+            images[i] = image[:, :, 1]
+        images = np.array(images)
+        print("Elapsed Time", time.time()-tic)
+
+        ## Step 4: Do periodicity analysis within blocks
+        X = frames[0].get_blocks(block_size)
+        X = get_block_pixel_indices(X, block_size)
+        Ys = [] # The time series
+        if show_block_timeseries:
+            plt.figure(figsize=(12, 6))
+        for i in range(X.shape[0]):
+            I, J = X[i, :, 0], X[i, :, 1]
+            y = images[:, I, J]
+            y = np.mean(y, axis=1)
+            y = bandpass_filter_timeseries(y, fs)
+            image = np.array(images[0, :, :])[:, :, None]
+            image = np.concatenate((image, image, image), axis=2)
+            image[I, J, 1] = 1
+            if show_block_timeseries:
+                plt.clf()
+                plt.subplot(131)
+                plt.imshow(image)
+                plt.subplot2grid((1, 3), (0, 1), colspan=2)
+                plt.plot(y)
+                plt.savefig("Win{}_Patch{}.png".format(window_num, i))
 
         istart += hop
-        win_num += 1
+        window_num += 1
 
-#"BUData/T10_T11_30Subjects/F024/T11"
-track_heartbeat("BUData/first10subjects_2D/F013/T1", 150, 25)
+if __name__ == '__main__':
+    #"BUData/T10_T11_30Subjects/F024/T11"
+    win = 150
+    hop = 25
+    fs = 25
+    track_heartbeat("BUData/first10subjects_2D/F013/T1", win, hop, fs, fine_points=True, show_block_timeseries=True)

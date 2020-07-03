@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-def estimateFundamentalFreq(x, doPlot = False):
+def get_clarity_pitch(x, doPlot = False):
     """
     Implementing the technique in "A Smarter Way To Find Pitch" by Philip McLeod
     and Geoff Wyvill, which is simple, elegant, and effective
@@ -73,5 +72,5 @@ if __name__ == '__main__':
     t = np.cumsum(np.random.rand(t.size)*2*slope)
     x = np.cos(t) + np.cos(2*t)
     x += 0.2*np.random.randn(x.size)
-    f = estimateFundamentalFreq(x, True)
+    f = get_clarity_pitch(x, True)
     plt.show()

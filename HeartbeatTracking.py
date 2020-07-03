@@ -1,7 +1,6 @@
 from FaceTools import *
-from FundamentalFreq import *
 import scipy.io as sio
-from scipy.signal import sosfilt, sosfiltfilt, butter
+from scipy.signal import sosfilt, sosfiltfilt, butter, periodogram
 import os
 import glob
 import subprocess
@@ -75,7 +74,7 @@ def get_frames_bbox(frames):
             bbox = bbox_union(bbox, f.get_bbox())
     return bbox
 
-def bandpass_filter_timeseries(y, fs, nfilt = 10, fl=0.7, fh=4):
+def bandpass_filter_timeseries(y, fs, nfilt = 10, fl=0.5, fh=5):
     """
     Apply a zero-phase Butterworth bandpass filter
     Parameters
@@ -87,9 +86,9 @@ def bandpass_filter_timeseries(y, fs, nfilt = 10, fl=0.7, fh=4):
     nfilt: int
         Order of the bandpass filter
     fl: float
-        Left cutoff of filter (in hz)
+        Left cutoff of bandpass filter (in hz)
     fr: float
-        Right cutoff of filter (in hz)
+        Right cutoff of bandpass filter (in hz)
     """
     minfq = 2*fl/fs
     maxfq = 2*fh/fs
@@ -97,7 +96,76 @@ def bandpass_filter_timeseries(y, fs, nfilt = 10, fl=0.7, fh=4):
     yfilt = sosfiltfilt(sos, y)
     return yfilt
 
-def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, show_warps=False, show_block_timeseries = False):
+def aggregate_kumar(Y, fs, Ath = 8, fl=0.5, fh=5, bwin=10, fac = 10):
+    """
+    Aggregate all of the time series from spatial blocks using
+    the technique from
+    [1] Kumar, Mayank, Ashok Veeraraghavan, and Ashutosh Sabharwal. 
+        "DistancePPG: Robust non-contact vital signs monitoring using a camera." 
+        Biomedical optics express 6.5 (2015): 1565-1588.
+    Parameters
+    ----------
+    Y: list of ndarray(M, N)
+        All of the different time series
+    fs: int
+        Sample rate
+    Ath: int
+        Range cutoff for a block
+    fl: float
+        Left cutoff of bandpass filter (in hz)
+    fr: float
+        Right cutoff of bandpass filter (in hz)
+    bwin: float
+        Half-length of interval to integrate for goodness
+        of fit, in beats per minute
+    fac: int
+        Factor by which to up-sample the PSD
+    Returns
+    -------
+    {
+        'yest': ndarray(N)
+            Initial time series estimate,
+        'yfinal': ndarray(N)
+            Final time series estimate,
+        'goodness': ndarray(M)
+            Goodness of fits,
+        'bpmorig': float
+            Initial beats per minute estimate,
+        'bpm': float
+            Final beats per minute estimate
+    }
+    """
+    # First, we assume that all the Gi are equal to 1.0
+    YRange = np.max(Y, axis=1) - np.min(Y, axis=1)
+    Y = Y[YRange < Ath, :]
+    yest = np.mean(Y, 0)
+    # Come up with an initial estimate of the pulse
+    freq, p = periodogram(yest, nfft=yest.size*fac)
+    freq = freq*fs*60
+    
+    # Come up with goodness of fit ratios based on this estimate
+    idx = np.argmax(p)
+    bpmorig = freq[idx]
+    idxnum = np.arange(freq.size)
+    idxnum = idxnum[np.abs(freq[idx]-freq) <= bwin]
+    idxdenom = np.arange(freq.size)
+    idxdenom = idxdenom[(freq > fl*60)*(freq < fh*60)]
+    freq, P = periodogram(Y, nfft=yest.size*fac, axis=1)
+    num = np.sum(P[:,idxnum], axis=1)
+    denom = np.sum(P[:, idxdenom], axis=1) - num
+    goodness = num/denom
+    goodness[goodness < 0] = 0
+
+    # Compute final time series and pulse estimate
+    yfinal = np.sum(goodness[:, None]*Y, 0)
+    freq, p = periodogram(yfinal, nfft=yfinal.size*fac)
+    bpm = freq[np.argmax(p)]*fs*60
+    goodnessret = np.zeros(YRange.size)
+    goodnessret[YRange < Ath] = goodness
+    return {'yest':yest, 'yfinal':yfinal, 'goodness':goodnessret, 'bpm':bpm, 'bpmorig':bpmorig}
+
+
+def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, show_warps=False, show_block_timeseries = False, plot_final_timeseries=False):
     """
     Parameters
     ---------
@@ -117,6 +185,9 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
         Whether to save plots showing the warping
     show_block_timeseries: boolean  
         Whether to plot information about the time series in each block
+    plot_final_timeseries: boolean
+        Whether to plot the final time series and show goodness of 
+        fit estimates
     """
     import cv2
     # Parameters for lucas kanade optical flow
@@ -208,10 +279,10 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
         images = np.array(images)
         print("Elapsed Time", time.time()-tic)
 
-        ## Step 4: Do periodicity analysis within blocks
+        ## Step 4: Split up time series into blocks
         X = frames[0].get_blocks(block_size)
         X = get_block_pixel_indices(X, block_size)
-        Ys = [] # The time series
+        Y = [] # The time series
         if show_block_timeseries:
             plt.figure(figsize=(12, 6))
         for i in range(X.shape[0]):
@@ -219,6 +290,7 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
             y = images[:, I, J]
             y = np.mean(y, axis=1)
             y = bandpass_filter_timeseries(y, fs)
+            Y.append(y)
             image = np.array(images[0, :, :])[:, :, None]
             image = np.concatenate((image, image, image), axis=2)
             image[I, J, 1] = 1
@@ -229,6 +301,32 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
                 plt.subplot2grid((1, 3), (0, 1), colspan=2)
                 plt.plot(y)
                 plt.savefig("Win{}_Patch{}.png".format(window_num, i))
+        Y = np.array(Y)
+
+        ## Step 5: Do periodicity analysis within blocks
+        res = aggregate_kumar(Y, fs)
+        if plot_final_timeseries:
+            image = np.array(images[0, :, :])[:, :, None]
+            image = np.concatenate((image, image, image), axis=2)
+            goodness = res['goodness']
+            goodness = 255*goodness/np.max(goodness)
+            for i, gi in enumerate(goodness):
+                I, J = X[i, :, 0], X[i, :, 1]
+                image[I, J, 0] = gi
+
+            plt.figure(figsize=(12, 6))
+            plt.subplot2grid((2, 3), (0, 0), rowspan=2, colspan=1)
+            plt.imshow(image)
+            plt.title("Goodness image")
+            plt.subplot2grid((2, 3), (0, 1), rowspan=1, colspan=2)
+            plt.plot(res['yest'])
+            plt.title("Initial Estimate, %.3g BPM"%res['bpmorig'])
+            plt.subplot2grid((2, 3), (1, 1), rowspan=1, colspan=2)
+            plt.plot(res['yfinal'])
+            plt.title("Final Estimate, %.3g BPM"%res['bpm'])
+            plt.savefig("Win{}Extimate.png".format(window_num))
+
+
 
         istart += hop
         window_num += 1
@@ -238,4 +336,4 @@ if __name__ == '__main__':
     win = 150
     hop = 25
     fs = 25
-    track_heartbeat("BUData/first10subjects_2D/F013/T1", win, hop, fs, fine_points=True, show_block_timeseries=True)
+    track_heartbeat("BUData/first10subjects_2D/F013/T1", win, hop, fs, fine_points=True, plot_final_timeseries=True)

@@ -1,6 +1,7 @@
 from FaceTools import *
 import scipy.io as sio
 from scipy.signal import sosfilt, sosfiltfilt, butter, periodogram
+from SlidingWindow import *
 import os
 import glob
 import subprocess
@@ -96,7 +97,7 @@ def bandpass_filter_timeseries(y, fs, nfilt = 10, fl=0.5, fh=5):
     yfilt = sosfiltfilt(sos, y)
     return yfilt
 
-def aggregate_kumar(Y, fs, Ath = 8, fl=0.5, fh=5, bwin=10, fac = 10):
+def aggregate_kumar(Y, fs, last_bpms, Ath = 8, fl=0.5, fh=5, bwin=10, fac = 10):
     """
     Aggregate all of the time series from spatial blocks using
     the technique from
@@ -109,6 +110,8 @@ def aggregate_kumar(Y, fs, Ath = 8, fl=0.5, fh=5, bwin=10, fac = 10):
         All of the different time series
     fs: int
         Sample rate
+    last_bpms: ndarray(4)
+        The last 4 epochs' bpms
     Ath: int
         Range cutoff for a block
     fl: float
@@ -143,11 +146,19 @@ def aggregate_kumar(Y, fs, Ath = 8, fl=0.5, fh=5, bwin=10, fac = 10):
     freq, p = periodogram(yest, nfft=yest.size*fac)
     freq = freq*fs*60
     
-    # Come up with goodness of fit ratios based on this estimate
+    # Check to make sure the estimate didn't jump too much
+    # since the last estimates
     idx = np.argmax(p)
     bpmorig = freq[idx]
+    if np.sum(np.isnan(last_bpms)) < last_bpms.size:
+        last_bpm = np.nanmedian(last_bpms)
+        if np.abs(last_bpm - bpmorig) > 25:
+            bpmorig = last_bpm
+            idx = np.argmin(np.abs(bpmorig-freq))
+
+    # Come up with goodness of fit ratios based on this estimate
     idxnum = np.arange(freq.size)
-    idxnum = idxnum[np.abs(freq[idx]-freq) <= bwin]
+    idxnum = idxnum[np.abs(bpmorig-freq) <= bwin]
     idxdenom = np.arange(freq.size)
     idxdenom = idxdenom[(freq > fl*60)*(freq < fh*60)]
     freq, P = periodogram(Y, nfft=yest.size*fac, axis=1)
@@ -163,6 +174,39 @@ def aggregate_kumar(Y, fs, Ath = 8, fl=0.5, fh=5, bwin=10, fac = 10):
     goodnessret = np.zeros(YRange.size)
     goodnessret[YRange < Ath] = goodness
     return {'yest':yest, 'yfinal':yfinal, 'goodness':goodnessret, 'bpm':bpm, 'bpmorig':bpmorig}
+
+def aggregate_daps(Y, fs, Ath = 8, fac=10):
+    """
+    Compute goodness of fit based on daps, then
+    aggregate, and use Laplacian circular coordinates
+    to determine the rate
+    Parameters
+    ----------
+    Y: list of ndarray(M, N)
+        All of the different time series
+    fs: int
+        Sample rate
+    Ath: int
+        Range cutoff for a block
+    """
+    # First compute the goodness of fit for each block
+    N = Y.shape[0]
+    goodness = np.zeros(N)
+    for i in range(N):
+        yi = Y[i, :]
+        if np.max(yi) - np.min(yi) < Ath:
+            res = pitch_detection(yi, detrend_win=fs)
+            goodness[i] = Sw1PerS(yi, fs, 1) #res['score']
+            Y[i, :] = res['x'] # Update with detrended time series
+    # Now aggregate based on the goodness of fit weights
+    denom = np.sum(goodness)
+    if denom == 0:
+        denom = 1
+    yfinal = np.sum(Y*goodness[:, None], 0)/denom
+    freq, p = periodogram(yfinal, nfft=yfinal.size*fac)
+    bpm = freq[np.argmax(p)]*fs*60
+    return {'yfinal':yfinal, 'bpm':bpm, 'goodness':goodness}
+
 
 
 def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, show_warps=False, show_block_timeseries = False, plot_final_timeseries=False):
@@ -202,6 +246,8 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
         return
     istart = 0
     window_num = 1
+    last_bpms = np.nan*np.ones(4)
+    all_bpms = []
     while istart + win <= len(files):
         ## Step 0: Load in images
         print("Loading block {}...".format(window_num))
@@ -304,7 +350,14 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
         Y = np.array(Y)
 
         ## Step 5: Do periodicity analysis within blocks
-        res = aggregate_kumar(Y, fs)
+        tic = time.time()
+        print("Doing Block Aggregation")
+        res = aggregate_daps(Y, fs)
+        #res = aggregate_kumar(Y, fs, last_bpms)
+        last_bpms[0:3] = last_bpms[1::]
+        last_bpms[-1] = res['bpm']
+        all_bpms.append(res['bpm'])
+        print("Elapsed Time Aggregation: ", time.time()-tic)
         if plot_final_timeseries:
             image = np.array(images[0, :, :])[:, :, None]
             image = np.concatenate((image, image, image), axis=2)
@@ -318,22 +371,33 @@ def track_heartbeat(path, win, hop, fs, block_size = 20, fine_points = False, sh
             plt.subplot2grid((2, 3), (0, 0), rowspan=2, colspan=1)
             plt.imshow(image)
             plt.title("Goodness image")
-            plt.subplot2grid((2, 3), (0, 1), rowspan=1, colspan=2)
-            plt.plot(res['yest'])
-            plt.title("Initial Estimate, %.3g BPM"%res['bpmorig'])
+            #plt.subplot2grid((2, 3), (0, 1), rowspan=1, colspan=2)
+            #plt.plot(res['yest'])
+            #plt.title("Initial Estimate, %.3g BPM"%res['bpmorig'])
             plt.subplot2grid((2, 3), (1, 1), rowspan=1, colspan=2)
             plt.plot(res['yfinal'])
             plt.title("Final Estimate, %.3g BPM"%res['bpm'])
             plt.savefig("Win{}Extimate.png".format(window_num))
-
-
-
+        
         istart += hop
         window_num += 1
+    return all_bpms
 
 if __name__ == '__main__':
     #"BUData/T10_T11_30Subjects/F024/T11"
+    import json
     win = 150
     hop = 25
     fs = 25
-    track_heartbeat("BUData/first10subjects_2D/F013/T1", win, hop, fs, fine_points=True, plot_final_timeseries=True)
+    all_bpms = track_heartbeat("BUData/first10subjects_2D/F013/T1", win, hop, fs, fine_points=False, show_warps=False, plot_final_timeseries=True)
+    json.dump({'all_bpms':all_bpms}, open("results.txt", "w"))
+    gt = np.loadtxt("BUData/first10subjects_Phydatareleased/Phydata/F013/T1/Pulse Rate_BPM.txt")
+    fsgt = 1000
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(all_bpms)
+    plt.plot(np.arange(gt.size)/fsgt, gt)
+    plt.xlabel("Time (Sec)")
+    plt.ylabel("BPM")
+    plt.legend(["Estimated", "Ground Truth"])
+    plt.savefig("FinalResult.svg", bbox_inches='tight')

@@ -5,6 +5,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
+from ripser import ripser
+from persim import plot_diagrams
 
 def drawLineColored(idx, x, C, ax = None):
     """
@@ -203,6 +205,104 @@ def get_lims(X, dim, pad=0.1):
     xlims[0] = xlims[0]-(xlims[1]-xlims[0])*pad
     xlims[1] = xlims[1]+(xlims[1]-xlims[0])*pad
     return xlims
+
+
+def Sw1PerS(xk, Win, dT, do_plot = False):
+    """
+    Sliding Window 1-Persistence Scoring (Sw1PerS)
+    of a time series
+    Parameters
+    ----------
+    xk: ndarray(N)
+        A time series on which to run Sw1PerS
+    Win: int
+        Sliding window length
+    dT: float
+        Increment between sliding windows
+    do_plot: boolean
+        Plot the time series next to the diagrams
+    """
+    X = getSlidingWindow(xk, Win, 1, dT)
+    X = normalizeWindows(X)
+
+    # Perform TDA and save the maximum persistence
+    # in H1 divided by sqrt(3)
+    dgms = ripser(X, coeff=13)['dgms']
+    h1 = dgms[1]
+    score = 0
+    if h1.size > 0:
+        score = np.max(h1[:, 1]-h1[:, 0])/np.sqrt(3)
+
+    if do_plot:
+        plt.clf()
+        plt.subplot(121)
+        plt.plot(xk)
+        plt.subplot(122)
+        plot_diagrams(dgms)
+        plt.title("Sw1PerS Score = %.3g"%score)
+    return score
+
+def pitch_detection(xk, do_plot=False, mean_center=True, detrend_win=None):
+    """
+    Periodicity scoring via autocorrelation peak picking,
+    normalizing to the squared magnitude of the signal
+    (so-called "pitch detection")
+    Parameters
+    ----------
+    xk: ndarray(N)
+        A time series on which to run Sw1PerS
+    do_plot: boolean
+        Plot the time series next to the diagrams
+    mean_center: boolean
+        Whether to mean center the time series before autocorrelation
+    detrend_win: int
+        If specified, use this window length to do sliding window
+        detrending
+    Returns
+    -------
+    idx: int
+        The chosen period (pitch), computed as a biproduct
+    score: float
+        The score between 0 and 1
+    y: ndarray(N-1)
+        Normalized autocorrelation
+    x: ndarray(N)
+        Signal on which autocorrelation was done (possibly detrended)
+    """
+    if detrend_win:
+        x = detrend_timeseries(xk, detrend_win)
+    else:
+        x = xk
+    if mean_center:
+        x = x - np.mean(x)
+    y = np.correlate(x, x, 'full') 
+    y = y[y.size//2:]
+    y /= y[0]
+    idx = np.arange(1, len(y)-1)
+    idx = idx[(y[idx-1] < y[idx])*(y[idx+1] < y[idx])]
+    if idx.size > 0:
+        idx = idx[np.argmax(y[idx])]
+        score = y[idx]
+    else:
+        idx = 0
+        score = 0
+    if do_plot:
+        plt.clf()
+        cols = 2
+        if detrend_win:
+            cols = 3
+        plt.subplot(1, cols, 1)
+        plt.plot(xk)
+        plt.title("Original Signal")
+        if detrend_win:
+            plt.subplot(132)
+            plt.plot(x)
+            plt.title("Detrended Signal")
+        plt.subplot(1, cols, cols)
+        plt.plot(y)
+        plt.stem([idx], [score])
+        plt.title("Pitch Score = %.3g"%score)
+    return {'idx':idx, 'score':score, 'y':y, 'x':x}
 
 #A class for doing animation of the sliding window
 class SlidingWindowAnimator(animation.FuncAnimation):
